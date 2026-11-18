@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Terminal, Download, Copy, Check, FileCode, Monitor, Smartphone, Cloud, Sparkles } from 'lucide-react';
+import { getPackagerConfigFilesClient } from '../utils/standaloneApi';
 
 export const TauriPackagerModal: React.FC = () => {
   const [configFiles, setConfigFiles] = useState<Record<string, string>>({});
@@ -8,23 +9,45 @@ export const TauriPackagerModal: React.FC = () => {
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  const [downloadNotice, setDownloadNotice] = useState<string | null>(null);
+
   useEffect(() => {
-    fetch('/api/tauri/config-files')
-      .then(res => res.json())
-      .then(data => {
-        if (data.success) {
-          setConfigFiles(data.files);
-          if (data.files['capacitor.config.json']) {
-            setActiveFile('capacitor.config.json');
-          } else {
-            const firstKey = Object.keys(data.files)[0];
-            if (firstKey) setActiveFile(firstKey);
-          }
+    getPackagerConfigFilesClient()
+      .then(files => {
+        setConfigFiles(files);
+        if (files['capacitor.config.json']) {
+          setActiveFile('capacitor.config.json');
+        } else {
+          const firstKey = Object.keys(files)[0];
+          if (firstKey) setActiveFile(firstKey);
         }
       })
       .catch(err => console.error('Failed to load packaging files', err))
       .finally(() => setLoading(false));
   }, []);
+
+  const handleDownloadZipTarget = async (target: 'android' | 'windows', fallbackName: string) => {
+    setDownloadNotice(null);
+    try {
+      const res = await fetch(`/api/package/download/${target}`);
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('application/zip')) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fallbackName;
+        a.click();
+        URL.revokeObjectURL(url);
+        return;
+      }
+    } catch {
+      // fall through to standalone notice
+    }
+    handleDownloadBundle();
+    setDownloadNotice('当前运行在独立静态/桌面客户端环境，已为您导出完整 JSON 配置清单；完整 .zip 工程套件请在源码仓库运行打包脚本或通过 GitHub Actions 获取。');
+    setTimeout(() => setDownloadNotice(null), 5000);
+  };
 
   const handlePlatformChange = (platform: 'android' | 'windows') => {
     setTargetPlatform(platform);
@@ -111,25 +134,26 @@ export const TauriPackagerModal: React.FC = () => {
               </button>
             </div>
 
-            <a
-              href="/api/package/download/android"
-              download="zlib-downloader-android-apk-package.zip"
+            <button
+              type="button"
+              onClick={() => handleDownloadZipTarget('android', 'zlib-downloader-android-apk-package.zip')}
               className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs rounded-xl shadow-lg shadow-emerald-600/20 transition-all flex items-center gap-2"
             >
               <Download size={15} />
               <span>下载安卓打包套件 (.zip)</span>
-            </a>
+            </button>
 
-            <a
-              href="/api/package/download/windows"
-              download="zlib-downloader-windows-tauri-package.zip"
+            <button
+              type="button"
+              onClick={() => handleDownloadZipTarget('windows', 'zlib-downloader-windows-tauri-package.zip')}
               className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-xl shadow-lg shadow-indigo-600/20 transition-all flex items-center gap-2"
             >
               <Download size={15} />
               <span>下载 Win 打包套件 (.zip)</span>
-            </a>
+            </button>
 
             <button
+              type="button"
               onClick={handleDownloadBundle}
               className="px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white font-semibold text-xs rounded-xl border border-white/20 transition-all flex items-center gap-2"
             >
@@ -137,6 +161,11 @@ export const TauriPackagerModal: React.FC = () => {
               <span>导出配置清单 (.json)</span>
             </button>
           </div>
+          {downloadNotice && (
+            <div className="p-2.5 rounded-lg bg-amber-500/20 border border-amber-400/40 text-amber-100 text-xs">
+              {downloadNotice}
+            </div>
+          )}
           <p className="text-[11px] text-indigo-200/80 leading-relaxed">
             注：下载的压缩套件包已包含预编译的 <code className="font-mono text-white">dist/</code> 前端产物、全部平台工程配置与一键脚本；解压后在本地双击 <code className="font-mono text-white">build_tauri.bat</code> / <code className="font-mono text-white">build_android_apk.bat</code>，或推送至 GitHub 点击 Actions 的 <code className="font-mono text-white">build-release.yml</code> 即可在云端直接生成最终 <code className="font-mono text-white">.exe</code> 与 <code className="font-mono text-white">.apk</code> 文件。
           </p>

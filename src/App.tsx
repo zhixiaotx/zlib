@@ -9,6 +9,7 @@ import { SettingsTab } from './components/SettingsTab';
 import { AISummaryModal } from './components/AISummaryModal';
 import { LoginModal } from './components/LoginModal';
 import { Book, DownloadTask, UserAccount, Mirror, AIConfig } from './types';
+import { searchZlibBooks } from './utils/standaloneApi';
 
 const DEFAULT_AI_PROFILE: AIConfig = {
   id: 'ai-google-default',
@@ -181,8 +182,7 @@ export default function App() {
       if (alreadySeeded) return;
     } catch (e) {}
 
-    fetch('/api/zlib/search')
-      .then(res => res.json())
+    searchZlibBooks({})
       .then(data => {
         if (data.success && Array.isArray(data.books) && data.books.length > 0) {
           const sampleBooks: Book[] = data.books.slice(0, 6);

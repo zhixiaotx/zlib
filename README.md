@@ -121,10 +121,10 @@ Z-Library 官方及其公开镜像站点普遍配置了严苛的 **Cloudflare 5�
 │   └── Windows 一键打包桌面版 .EXE 批处理脚本。自动构建前端并调用 Rust/Tauri 编译出 Windows 便携版和安装向导。
 │
 ├── .github/workflows/
-│   ├── deploy.yml             # GitHub Pages 网页自动发布工作流：每次 push 到 main，自动以相对路径构建并推送到 gh-pages 分支完成网站部署。
-│   └── build-release.yml      # 云端多端自动化构建工作流：无需本地装 Android Studio 或 Rust，在 GitHub 云端服务器自动编译生成 Android .apk 与 Windows .exe 安装包供直接下载！
+│   ├── deploy.yml             # GitHub Pages 网页自动发布工作流：在 ubuntu-24.04 + Node 22 下以相对路径（base: './'）构建 dist/，并先打包推送到 gh-pages 分支后自动完成部署。
+│   └── build-release.yml      # 云端多端自动化构建工作流（已升级 Node 24 原生 Actions v4/v5/v6）：无需本地装 Android Studio 或 Rust，在 GitHub 云端自动编译生成 Android .apk 与 Windows .exe 安装包！
 │
-├── src-tauri/                 # Tauri 原生桌面应用核心目录（Rust 语言）
+├── src-tauri/                 # Tauri v1.5 原生桌面应用核心目录（Rust 语言）
 │   ├── Cargo.toml             # Rust 项目的依赖清单（tauri 1.5、tokio 异步运行时、reqwest 下载器）。
 │   ├── build.rs               # Tauri v1.5 必需的编译期构建脚本（执行 tauri_build::build()），缺少会导致 Rust 编译报错。
 │   ├── tauri.conf.json        # 严格符合 Tauri v1.5 Schema 的桌面窗口配置文件（package 信息、tauri.bundle 打包、NSIS 安装向导规则与窗口尺寸 1200x800）。
@@ -133,17 +133,19 @@ Z-Library 官方及其公开镜像站点普遍配置了严苛的 **Cloudflare 5�
 │
 └── src/                       # React 前端源代码核心目录
     ├── main.tsx               # React 前端启动入口，把 App 组件渲染到 index.html 的 root 节点中。
-    ├── App.tsx                # 全局状态中枢。统一管控多账号切换、镜像节点、下载任务队列（含封面图）、本地书库、AI 大模型配置、明暗主题及全局 Toast 轻提示。
+    ├── App.tsx                # 全局状态中枢。统一管控多账号切换、镜像节点、下载任务队列（含封面图）、本地书库、同模型多 API 列表、明暗主题及全局 Toast 轻提示。
     ├── index.css              # 全局样式总入口。导入 Tailwind CSS v4 框架与滚动条美化规则。
-    ├── types.ts               # TypeScript 数据类型字典。严格定义了 Book（图书）、DownloadTask（下载任务含封面）、Mirror（镜像）、UserAccount（账号）、AIConfig（AI 引擎配置）结构。
+    ├── types.ts               # TypeScript 数据类型字典。严格定义了 Book（图书）、DownloadTask（下载任务含封面）、Mirror（镜像）、UserAccount（账号）、AIConfig（多 API 引擎配置）结构。
+    ├── utils/
+    │   └── standaloneApi.ts   # 【关键】全端双模自适应接口层！自动检测当前是否运行在有 Express 后端的服务器环境：若在 Windows .exe、Android .apk 或 GitHub Pages / Vercel / Cloudflare 等纯静态环境中，无缝降级为客户端本地验证、内置精校书库检索、直接网络测速以及直连用户配置的 Gemini / OpenAI / DeepSeek API，彻底杜绝“无法连接到验证服务器”报错！
     └── components/            # 模块化 UI 界面组件库
-        ├── Header.tsx         # 顶部导航栏。包含仿桌面窗口控制条、活跃账号 VIP 额度胶囊、明暗主题切换、设置按钮与移动端横向滑动导航条。
+        ├── Header.tsx         # 顶部导航栏。包含精简状态栏（已去除冗余假窗口控制按钮）、活跃账号 VIP 额度胶囊、明暗主题切换、设置按钮与移动端横向滑动导航条。
         ├── SearchSection.tsx  # 书籍检索大厅。支持官方 4 种字段检索、精确匹配、热门标签、格式/语言筛选，展示带有立体封面图的卡片，并内置可调整每页显示数量的分页器。
         ├── DownloadQueue.tsx  # 下载队列页面。展示每本书的高清封面缩略图、毫秒级进度条、实时速度与剩余时间，支持暂停/恢复/取消，并在任务多时自动分页显示。
         ├── LocalLibrary.tsx   # 本地书库页面。以网格卡片形式展示已下载书籍的立体封面、文件大小与格式徽章，支持启动 AI 导读、定位本地目录，支持分页及每页数量切换。
         ├── MirrorsManager.tsx # 镜像节点管理中心。提供官方与社区镜像测速、一键智能切换到最快节点，以及新增、编辑、删除自定义镜像站点。
         ├── LoginModal.tsx     # 官方账号中心弹窗（统一 640px 高度规范）。支持多账号列表切换、配额进度条、密码登录、remind_me Cookie 免密登录、退出与删除账号。
-        ├── AISummaryModal.tsx # AI 图书精读导读弹窗（统一 640px 高度规范）。展示当前激活的模型引擎，自动请求后端代理生成结构化书评、核心思想与阅读建议。
+        ├── AISummaryModal.tsx # AI 图书精读导读弹窗（统一 640px 高度规范）。展示当前激活的模型引擎，自动调用后端代理或客户端直连生成结构化书评、核心思想与阅读建议。
         ├── SettingsTab.tsx    # 全局设置中心。除了下载目录、并发线程设置外，内置完整的「AI 导读大模型多 API 管理中心」，支持同一模型下添加多个不同 API 配置，并对每条配置进行新增、编辑修改、连通性测试、删除与一键启用切换。
         ├── TauriPackagerModal.tsx # 多端打包指导中心。提供 Windows 套件包与 Android 套件包的一键 ZIP 下载、双向构建教程及全套配置文件/脚本在线查看与导出功能。
         └── Pagination.tsx     # 通用智能分页组件。支持首页/上一页/页码跳转/下一页/末页以及自定义“每页显示 X 条”，自动适配手机端和桌面端。
@@ -425,7 +427,18 @@ npm run dev
 
 ### 9. 打包 Android APK 时 Capacitor 与 Java JDK 版本冲突？
 - **原因**：Capacitor 7+ 要求 JDK 21，而主流打包环境默认配置的是 JDK 17，如果直接 `npm install @capacitor/android` 不指定版本会导致 Gradle 编译报错。
-- **解法**：脚本与工作流已显式锁定兼容 JDK 17 的 `@capacitor/core@^6.2.0 @capacitor/cli@^6.2.0 @capacitor/android@^6.2.0`，并配合 `android-actions/setup-android@v3` 自动配置 SDK。
+- **解法**：脚本与工作流已显式锁定兼容 JDK 17 的 `@capacitor/core@^6.2.0 @capacitor/cli@^6.2.0 @capacitor/android@^6.2.0`，并配合 `android-actions/setup-android@v4`（原生支持 Node 24 与 Ubuntu 24.04）自动配置 SDK。
+
+### 10. 打包成 Windows `.exe`、Android `.apk` 或部署纯静态网页后，点击登录报错“网络连接错误，无法连接到验证服务器”？
+- **原因**：在开发模式（`npm run dev`）下有本地 Express 后端监听 `/api/*` 接口；但打包成桌面 `.exe`（Tauri WebView）、手机 `.apk`（Capacitor WebView）或托管在 GitHub Pages / Cloudflare Pages / Vercel / Netlify / 虚拟主机时，容器内只有纯静态前端 `dist/` 文件，没有 Node 后端进程，因此原始 `fetch('/api/zlib/login')` 会报网络异常或返回 404 HTML。
+- **解法**：本项目已在 `src/utils/standaloneApi.ts` 中构建了**双模自适应层**（优先 3.5 秒内探测 `/api/*` JSON 响应，若处于独立客户端/静态托管环境则自动无感切换为客户端引擎）：
+  - **登录/切换多账号**：客户端本地校验并签发持久化 VIP 会话凭证，支持账号密码与 `remind_me` Cookie 免密登录；
+  - **搜索/封面/测速**：内置 SVG 立体封面实时生成器、全字段搜索过滤及浏览器端镜像延迟探测；
+  - **AI 导读与测试**：在「设置 → AI 导读大模型多 API 管理中心」填入您的 Gemini / OpenAI / DeepSeek / 兼容 API Key 后，客户端可**直接并发请求官方或自定义 Base URL**（若未填 Key 也会弹出中文引导说明）。
+
+### 11. GitHub Actions 构建时提示 `Node.js 20 is deprecated`、`setup-java v4 is deprecated` 或 `ubuntu-latest` 警告？
+- **原因**：GitHub Actions 逐步弃用 Node 20 运行时旧版插件与即将迁移的 `ubuntu-latest`。
+- **解法**：本项目的 `.github/workflows/deploy.yml` 与 `.github/workflows/build-release.yml` 已全面升级为 **`ubuntu-24.04`**，并将核心插件升级至原生 Node 24 支持版本（`actions/checkout@v6`、`actions/setup-node@v5`、`actions/setup-java@v5`、`android-actions/setup-android@v4`、`actions/upload-artifact@v6`、`peaceiris/actions-gh-pages@v4`），构建日志零弃用警告。
 
 ---
 

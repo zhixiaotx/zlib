@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Sparkles, Loader2, Settings } from 'lucide-react';
 import { Book, AIConfig } from '../types';
+import { generateAISummaryClient } from '../utils/standaloneApi';
 
 interface AISummaryModalProps {
   book: Book | null;
@@ -33,19 +34,9 @@ export const AISummaryModal: React.FC<AISummaryModalProps> = ({
     setError('');
     setSummary('');
 
-    fetch('/api/gemini/summary', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title: book.title,
-        author: book.author,
-        description: book.description,
-        aiConfig
-      })
-    })
-      .then(res => res.json())
+    generateAISummaryClient(book, aiConfig)
       .then(data => {
-        if (data.success) {
+        if (data.success && data.summary) {
           setSummary(data.summary);
           setProviderUsed(data.providerUsed || `${PROVIDER_LABELS[aiConfig.provider] || aiConfig.provider}`);
         } else {

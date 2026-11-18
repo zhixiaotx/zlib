@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Search, Filter, Download, Sparkles, Star, Globe, CheckCircle2, ArrowRight, BookOpen, SortAsc, RefreshCw, X, Copy, Check, Eye, Tag, Calendar, Layers } from 'lucide-react';
 import { Book, Mirror, UserAccount } from '../types';
 import { Pagination } from './Pagination';
+import { searchZlibBooks } from '../utils/standaloneApi';
 
 interface SearchSectionProps {
   onStartDownload: (book: Book) => void;
@@ -58,17 +59,15 @@ export const SearchSection: React.FC<SearchSectionProps> = ({
       const q = overrideQuery !== undefined ? overrideQuery : query;
       const f = overrideField !== undefined ? overrideField : searchField;
 
-      const params = new URLSearchParams();
-      if (q.trim()) params.append('q', q.trim());
-      if (f !== 'all') params.append('field', f);
-      if (language !== 'all') params.append('lang', language);
-      if (extension !== 'all') params.append('ext', extension);
-      if (exactMatch) params.append('exact', 'true');
-      if (yearFrom) params.append('yearFrom', yearFrom);
-      if (yearTo) params.append('yearTo', yearTo);
-
-      const res = await fetch(`/api/zlib/search?${params.toString()}`);
-      const data = await res.json();
+      const data = await searchZlibBooks({
+        q,
+        field: f,
+        lang: language,
+        ext: extension,
+        exact: exactMatch,
+        yearFrom,
+        yearTo
+      });
       if (data.success) {
         let sorted = [...data.books];
         if (sortBy === 'rating') {

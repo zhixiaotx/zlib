@@ -1,5 +1,5 @@
 import React from 'react';
-import { BookOpen, Download, Globe, HardDrive, Terminal, Settings, Sun, Moon, Minus, Square, X, Search, User, Users } from 'lucide-react';
+import { BookOpen, Download, Globe, HardDrive, Terminal, Settings, Sun, Moon, Search, User, Users } from 'lucide-react';
 import { UserAccount } from '../types';
 
 interface HeaderProps {
@@ -42,11 +42,6 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
             多端原生就绪 (.exe / .apk)
           </span>
-          <div className="flex items-center gap-1 text-slate-500 dark:text-slate-400">
-            <button className="p-1 hover:text-slate-900 dark:hover:text-white transition-colors"><Minus size={12} /></button>
-            <button className="p-1 hover:text-slate-900 dark:hover:text-white transition-colors"><Square size={12} /></button>
-            <button className="p-1 hover:text-red-500 transition-colors"><X size={12} /></button>
-          </div>
         </div>
       </div>
 

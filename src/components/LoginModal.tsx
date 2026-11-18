@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { User, Lock, Key, CheckCircle2, X, Shield, LogOut, Plus, Trash2, Check, HelpCircle, ChevronDown, ChevronUp, Copy, ExternalLink, ArrowRight, Globe, Info } from 'lucide-react';
 import { UserAccount, Mirror } from '../types';
+import { loginZlibAccount } from '../utils/standaloneApi';
 
 interface LoginModalProps {
   accounts: UserAccount[];
@@ -47,16 +48,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     setError('');
 
     try {
-      const res = await fetch('/api/zlib/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: loginMode === 'password' ? email.trim() : '',
-          password: loginMode === 'password' ? password : '',
-          cookieToken: loginMode === 'cookie' ? cookieToken.trim() : ''
-        })
+      const data = await loginZlibAccount({
+        email: loginMode === 'password' ? email.trim() : '',
+        password: loginMode === 'password' ? password : '',
+        cookieToken: loginMode === 'cookie' ? cookieToken.trim() : ''
       });
-      const data = await res.json();
       if (data.success && data.user) {
         onAddAccount(data.user);
         setEmail('');
@@ -67,7 +63,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         setError(data.error || '登录验证失败，请检查账号密码或 Cookie');
       }
     } catch (err) {
-      setError('网络连接错误，无法连接到验证服务器');
+      setError('登录处理异常，请检查输入信息后重试');
     } finally {
       setLoading(false);
     }

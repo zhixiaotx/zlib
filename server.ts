@@ -966,17 +966,17 @@ permissions:
 
 jobs:
   build-android-apk:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
       - name: 构建 Web 并生成 Android APK
         run: |
           npm install --legacy-peer-deps
@@ -986,7 +986,7 @@ jobs:
           npx cap sync android
           cd android && chmod +x ./gradlew && ./gradlew assembleDebug
       - name: 上传 APK 构建产物
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: zlib-downloader-android-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
@@ -995,8 +995,8 @@ jobs:
   build-windows-exe:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
       - uses: dtolnay/rust-toolchain@stable
@@ -1006,7 +1006,7 @@ jobs:
           npm run build
           npx --yes @tauri-apps/cli@1.5 build
       - name: 上传 EXE 构建产物
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: zlib-downloader-windows-exe
           path: |

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Globe, RefreshCw, Shield, Plus, Edit2, Trash2, Zap, Check, X, ExternalLink, ArrowRight, UserCheck, HelpCircle } from 'lucide-react';
 import { Mirror } from '../types';
+import { testMirrorsLatency } from '../utils/standaloneApi';
 
 interface MirrorsManagerProps {
   mirrors: Mirror[];
@@ -25,17 +26,8 @@ export const MirrorsManager: React.FC<MirrorsManagerProps> = ({
   const testMirrors = async () => {
     setTesting(true);
     try {
-      const res = await fetch('/api/zlib/mirrors/test', { method: 'POST' });
-      const data = await res.json();
-      if (data.success && data.mirrors) {
-        // preserve active flag
-        const currentActiveId = mirrors.find(m => m.active)?.id;
-        const updated = data.mirrors.map((m: Mirror) => ({
-          ...m,
-          active: m.id === currentActiveId
-        }));
-        setMirrors(updated);
-      }
+      const updated = await testMirrorsLatency(mirrors);
+      setMirrors(updated);
     } catch (err) {
       console.error('Failed to test mirrors', err);
     } finally {
@@ -47,14 +39,14 @@ export const MirrorsManager: React.FC<MirrorsManagerProps> = ({
   const handleAutoSwitch = async () => {
     setTesting(true);
     try {
-      const res = await fetch('/api/zlib/mirrors/test', { method: 'POST' });
-      const data = await res.json();
-      if (data.success && data.mirrors.length > 0) {
-        const onlineMirrors = data.mirrors.filter((m: Mirror) => m.status === 'online');
-        const target = onlineMirrors.length > 0 ? onlineMirrors[0] : data.mirrors[0];
-        const updated = data.mirrors.map((m: Mirror) => ({
+      const tested = await testMirrorsLatency(mirrors);
+      if (tested.length > 0) {
+        const onlineMirrors = tested.filter((m: Mirror) => m.status === 'online');
+        const pool = onlineMirrors.length > 0 ? onlineMirrors : tested;
+        const fastest = [...pool].sort((a, b) => (parseInt(a.latency) || 999) - (parseInt(b.latency) || 999))[0];
+        const updated = tested.map((m: Mirror) => ({
           ...m,
-          active: m.id === target.id
+          active: m.id === fastest.id
         }));
         setMirrors(updated);
       }

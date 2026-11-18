@@ -4,6 +4,7 @@ import {
   Loader2, ShieldCheck, AlertCircle, Plus, Pencil, Trash2, Check, X, Zap
 } from 'lucide-react';
 import { AIConfig, AIProvider } from '../types';
+import { testAIConfigClient } from '../utils/standaloneApi';
 
 interface SettingsTabProps {
   aiProfiles: AIConfig[];
@@ -170,26 +171,19 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     setTestingEditor(true);
     setEditorTestResult(null);
     try {
-      const res = await fetch('/api/ai/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          aiConfig: {
-            provider: selectedProvider,
-            baseUrl: formBaseUrl.trim() || preset.defaultBaseUrl,
-            model: formModel.trim() || preset.defaultModel,
-            apiKey: formApiKey.trim()
-          }
-        })
+      const data = await testAIConfigClient({
+        provider: selectedProvider,
+        baseUrl: formBaseUrl.trim() || preset.defaultBaseUrl,
+        model: formModel.trim() || preset.defaultModel,
+        apiKey: formApiKey.trim()
       });
-      const data = await res.json();
       if (data.success) {
-        setEditorTestResult({ ok: true, msg: data.message });
+        setEditorTestResult({ ok: true, msg: data.message || '连通性测试成功！' });
       } else {
         setEditorTestResult({ ok: false, msg: data.error || '连通性测试失败' });
       }
     } catch (err) {
-      setEditorTestResult({ ok: false, msg: '网络错误：无法连接到后端验证路由' });
+      setEditorTestResult({ ok: false, msg: '网络错误：无法连接到 AI 接口' });
     } finally {
       setTestingEditor(false);
     }
@@ -198,16 +192,11 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   const handleTestSavedProfile = async (profile: AIConfig) => {
     setTestingProfileId(profile.id);
     try {
-      const res = await fetch('/api/ai/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ aiConfig: profile })
-      });
-      const data = await res.json();
+      const data = await testAIConfigClient(profile);
       setCardTestResults(prev => ({
         ...prev,
         [profile.id]: data.success
-          ? { ok: true, msg: data.message }
+          ? { ok: true, msg: data.message || '连通性正常！' }
           : { ok: false, msg: data.error || '测试失败' }
       }));
       if (onShowToast) {
