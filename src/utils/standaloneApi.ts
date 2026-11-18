@@ -1,304 +1,248 @@
 import { AIConfig, Book, Mirror, UserAccount } from '../types';
 
-function hashStr(str: string): number {
-  let h = 0;
-  for (let i = 0; i < str.length; i++) {
-    h = (h << 5) - h + str.charCodeAt(i);
-    h |= 0;
-  }
-  return h;
+export function normalizeMirrorBaseUrl(mirrorUrl?: string): string {
+  const raw = (mirrorUrl || 'https://z-lib.id').trim().replace(/\/+$/, '');
+  if (!raw) return 'https://z-lib.id';
+  return raw.startsWith('http://') || raw.startsWith('https://') ? raw : `https://${raw}`;
 }
 
-function escapeXml(unsafe: string): string {
-  return unsafe.replace(/[<>&'"]/g, (c) => {
-    switch (c) {
-      case '<': return '&lt;';
-      case '>': return '&gt;';
-      case '&': return '&amp;';
-      case '\'': return '&apos;';
-      case '"': return '&quot;';
-      default: return c;
+export function formatCookieHeader(token?: string): string {
+  const raw = (token || '').trim();
+  if (!raw) return '';
+  if (raw.includes('=')) return raw;
+  return `zlibrary_session=${raw}; remind_me=${raw}; remix_userkey=${raw}`;
+}
+
+export function buildMirrorSearchUrl(params: {
+  mirrorUrl?: string;
+  q?: string;
+  field?: string;
+  lang?: string;
+  ext?: string;
+  exact?: boolean;
+  yearFrom?: string;
+  yearTo?: string;
+  page?: number;
+}): string {
+  const base = normalizeMirrorBaseUrl(params.mirrorUrl);
+  const q = (params.q || '').trim();
+  const field = (params.field || 'all').toLowerCase();
+
+  let searchTerm = q;
+  if (q && field === 'author') searchTerm = `author:${q}`;
+  else if (q && field === 'isbn') searchTerm = q.replace(/\s+/g, '');
+  else if (q && field === 'publisher') searchTerm = `publisher:${q}`;
+
+  const useQueryStyle = /z-lib\.id|z-lib\.cc/i.test(base);
+  const url = searchTerm
+    ? useQueryStyle
+      ? (() => {
+          const u = new URL(`${base}/s`);
+          u.searchParams.set('q', searchTerm);
+          return u;
+        })()
+      : new URL(`${base}/s/${encodeURIComponent(searchTerm)}`)
+    : new URL(`${base}/`);
+
+  if (params.lang && params.lang !== 'all') {
+    url.searchParams.append('languages[]', params.lang.toLowerCase());
+  }
+  if (params.ext && params.ext !== 'all') {
+    url.searchParams.append('extensions[]', params.ext.toUpperCase());
+  }
+  if (params.exact) {
+    url.searchParams.set('e', '1');
+  }
+  if (params.yearFrom) {
+    url.searchParams.set('yearFrom', params.yearFrom);
+  }
+  if (params.yearTo) {
+    url.searchParams.set('yearTo', params.yearTo);
+  }
+  if (params.page && params.page > 1) {
+    url.searchParams.set('page', String(params.page));
+  }
+  return url.toString();
+}
+
+function getTauriInvoke():
+  | ((cmd: string, args?: Record<string, any>) => Promise<any>)
+  | null {
+  if (typeof window === 'undefined') return null;
+  const w = window as any;
+  if (w.__TAURI__?.tauri?.invoke) return w.__TAURI__.tauri.invoke;
+  if (w.__TAURI__?.invoke) return w.__TAURI__.invoke;
+  return null;
+}
+
+export async function openExternalUrl(url: string): Promise<void> {
+  const w = window as any;
+  if (w.__TAURI__?.shell?.open) {
+    try {
+      await w.__TAURI__.shell.open(url);
+      return;
+    } catch {
+      // fall back to anchor navigation
     }
-  });
-}
-
-export function generateBookCoverSvg(
-  title: string,
-  author: string,
-  color1: string,
-  color2: string,
-  category: string,
-  ext = 'EPUB',
-  isbn = '978-0-0000-0000-0'
-): string {
-  const h = Math.abs(hashStr(title));
-  const safeTitle = escapeXml(title);
-  const safeAuthor = escapeXml(author);
-  const safeCat = escapeXml(category.toUpperCase());
-  const extColor =
-    ext.toLowerCase() === 'pdf'
-      ? '#ef4444'
-      : ext.toLowerCase() === 'epub'
-      ? '#10b981'
-      : ext.toLowerCase() === 'mobi'
-      ? '#3b82f6'
-      : '#f59e0b';
-
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
-    <defs>
-      <linearGradient id="bg_${h}" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" stop-color="${color1}" />
-        <stop offset="100%" stop-color="${color2}" />
-      </linearGradient>
-      <linearGradient id="spine_${h}" x1="0%" y1="0%" x2="100%" y2="0%">
-        <stop offset="0%" stop-color="rgba(0,0,0,0.45)" />
-        <stop offset="70%" stop-color="rgba(0,0,0,0.15)" />
-        <stop offset="100%" stop-color="rgba(255,255,255,0.2)" />
-      </linearGradient>
-      <linearGradient id="gold_${h}" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" stop-color="#fbbf24" />
-        <stop offset="100%" stop-color="#d97706" />
-      </linearGradient>
-    </defs>
-    <rect width="300" height="420" rx="10" fill="url(#bg_${h})" />
-    <rect x="0" y="0" width="24" height="420" rx="6" fill="url(#spine_${h})" />
-    <line x1="24" y1="0" x2="24" y2="420" stroke="rgba(0,0,0,0.35)" stroke-width="1.5" />
-    <rect x="36" y="24" width="244" height="372" rx="8" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1.5" />
-    <rect x="42" y="32" width="48" height="20" rx="4" fill="${extColor}" />
-    <text x="66" y="46" font-family="system-ui, sans-serif" font-size="10" font-weight="900" fill="#ffffff" text-anchor="middle">${ext.toUpperCase()}</text>
-    <text x="160" y="47" font-family="system-ui, sans-serif" font-size="10" font-weight="700" fill="rgba(255,255,255,0.85)" text-anchor="middle">${safeCat}</text>
-    <circle cx="150" cy="115" r="38" fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.4)" stroke-width="2" />
-    <path d="M135 115 L150 100 L165 115 L150 130 Z" fill="rgba(255,255,255,0.5)" />
-    <text x="155" y="195" font-family="'Noto Serif SC', Georgia, serif" font-size="18" font-weight="bold" fill="#ffffff" text-anchor="middle">
-      ${safeTitle.length > 14 ? safeTitle.substring(0, 13) + '…' : safeTitle}
-    </text>
-    <text x="155" y="222" font-family="'Noto Serif SC', Georgia, serif" font-size="13" font-weight="500" fill="rgba(255,255,255,0.85)" text-anchor="middle">
-      ${safeTitle.length > 14 ? safeTitle.substring(13, 27) : ''}
-    </text>
-    <line x1="85" y1="244" x2="225" y2="244" stroke="url(#gold_${h})" stroke-width="1.5" />
-    <text x="155" y="272" font-family="system-ui, sans-serif" font-size="13" font-weight="600" fill="rgba(255,255,255,0.95)" text-anchor="middle">
-      ${safeAuthor.length > 18 ? safeAuthor.substring(0, 17) + '…' : safeAuthor}
-    </text>
-    <circle cx="155" cy="326" r="18" fill="url(#gold_${h})" opacity="0.9" />
-    <polygon points="155,314 158,322 166,322 160,327 162,335 155,330 148,335 150,327 144,322 152,322" fill="#ffffff" />
-    <rect x="52" y="358" width="206" height="24" rx="4" fill="rgba(0,0,0,0.35)" />
-    <text x="155" y="374" font-family="monospace" font-size="9.5" font-weight="bold" fill="#fbbf24" text-anchor="middle">Z-LIBRARY OFFICIAL ARCHIVE</text>
-    <text x="155" y="394" font-family="monospace" font-size="8" fill="rgba(255,255,255,0.5)" text-anchor="middle">ISBN ${isbn}</text>
-  </svg>`;
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-}
-
-export const STANDALONE_BOOKS: Book[] = [
-  {
-    id: 'zlib-101',
-    title: '三体 (全集)',
-    author: '刘慈欣',
-    year: '2018',
-    publisher: '重庆出版社',
-    extension: 'epub',
-    filesize: '12.8 MB',
-    language: 'Chinese',
-    rating: 5.0,
-    isbn: '978-7-5366-9290-9',
-    pages: '880 页',
-    quality: '官方插图全集精校版',
-    coverUrl: generateBookCoverSvg('三体 (全集)', '刘慈欣', '#09122c', '#1e3a8a', '科幻文学', 'epub', '978-7-5366-9290-9'),
-    description: '第73届雨果奖最佳长篇小说。人类文明与四光年外的三体文明展开跨越星际的震撼博弈。',
-    downloadsCount: 382400
-  },
-  {
-    id: 'zlib-1',
-    title: 'Designing Data-Intensive Applications',
-    author: 'Martin Kleppmann',
-    year: '2017',
-    publisher: "O'Reilly Media",
-    extension: 'pdf',
-    filesize: '35.4 MB',
-    language: 'English',
-    rating: 4.9,
-    isbn: '978-1-4493-7332-0',
-    pages: '616 页',
-    quality: '原版高清文字版',
-    coverUrl: generateBookCoverSvg('Designing Data-Intensive Apps', 'Martin Kleppmann', '#064e3b', '#047857', 'System Architecture', 'pdf', '978-1-4493-7332-0'),
-    description: 'The Big Ideas Behind Reliable, Scalable, and Maintainable Systems.',
-    downloadsCount: 142850
-  },
-  {
-    id: 'zlib-2',
-    title: 'Clean Code: 代码整洁之道',
-    author: 'Robert C. Martin (Uncle Bob)',
-    year: '2010',
-    publisher: '人民邮电出版社',
-    extension: 'epub',
-    filesize: '18.2 MB',
-    language: 'Chinese',
-    rating: 4.8,
-    isbn: '978-7-115-21687-8',
-    pages: '388 页',
-    quality: '官方中文精排版',
-    coverUrl: generateBookCoverSvg('代码整洁之道 Clean Code', 'Robert C. Martin', '#1e1b4b', '#4338ca', '软件工艺', 'epub', '978-7-115-21687-8'),
-    description: '软件工程领域的旷世经典。全面阐述高内聚、低耦合、重构与单元测试工匠艺术。',
-    downloadsCount: 230910
-  },
-  {
-    id: 'zlib-3',
-    title: 'Deep Learning (深度学习 花书)',
-    author: 'Ian Goodfellow, Yoshua Bengio, Aaron Courville',
-    year: '2017',
-    publisher: '人民邮电出版社',
-    extension: 'pdf',
-    filesize: '48.9 MB',
-    language: 'Chinese',
-    rating: 4.8,
-    isbn: '978-7-115-46147-6',
-    pages: '522 页',
-    quality: '官方全彩中文文字版',
-    coverUrl: generateBookCoverSvg('Deep Learning (花书)', 'Ian Goodfellow et al.', '#4c0519', '#9f1239', 'Artificial Intelligence', 'pdf', '978-7-115-46147-6'),
-    description: 'AI 领域公认圣经，涵盖深度学习数学基础、CNN、RNN 与生成式模型。',
-    downloadsCount: 98400
-  },
-  {
-    id: 'zlib-4',
-    title: '深入理解计算机系统 (CSAPP 第3版)',
-    author: "Randal E. Bryant, David R. O'Hallaron",
-    year: '2016',
-    publisher: '机械工业出版社',
-    extension: 'pdf',
-    filesize: '68.2 MB',
-    language: 'Chinese',
-    rating: 4.9,
-    isbn: '978-7-111-54493-7',
-    pages: '752 页',
-    quality: '高清双色文字版',
-    coverUrl: generateBookCoverSvg('深入理解计算机系统 CSAPP', 'R. E. Bryant', '#1c1917', '#44403c', '计算机底层', 'pdf', '978-7-111-54493-7'),
-    description: '卡耐基梅隆大学金牌经典教材，深入剖析计算机体系结构、汇编、虚拟内存与并发编程。',
-    downloadsCount: 198200
-  },
-  {
-    id: 'zlib-5',
-    title: 'The Pragmatic Programmer (20th Anniversary)',
-    author: 'David Thomas, Andrew Hunt',
-    year: '2020',
-    publisher: 'Addison-Wesley Professional',
-    extension: 'epub',
-    filesize: '12.1 MB',
-    language: 'English',
-    rating: 4.9,
-    isbn: '978-0-135-95705-9',
-    pages: '352 页',
-    quality: 'Retail EPUB Original',
-    coverUrl: generateBookCoverSvg('The Pragmatic Programmer', 'David Thomas, Andrew Hunt', '#312e81', '#6366f1', 'Programming', 'epub', '978-0-135-95705-9'),
-    description: 'Actionable engineering wisdom for modern software craftspeople.',
-    downloadsCount: 175600
-  },
-  {
-    id: 'zlib-6',
-    title: 'JavaScript 高级程序设计（第4版 红宝书）',
-    author: 'Matt Frisbie',
-    year: '2020',
-    publisher: '人民邮电出版社',
-    extension: 'pdf',
-    filesize: '55.7 MB',
-    language: 'Chinese',
-    rating: 4.9,
-    isbn: '978-7-115-54538-0',
-    pages: '886 页',
-    quality: '双色高清文字版',
-    coverUrl: generateBookCoverSvg('JavaScript高级程序设计', 'Matt Frisbie', '#831843', '#be185d', 'Web开发', 'pdf', '978-7-115-54538-0'),
-    description: '前端开发者必备红宝书，详尽解析 ECMAScript、DOM、异步编程与现代 Web API。',
-    downloadsCount: 264000
-  },
-  {
-    id: 'zlib-7',
-    title: 'Rust Programming Language, 2nd Edition',
-    author: 'Steve Klabnik, Carol Nichols',
-    year: '2023',
-    publisher: 'No Starch Press',
-    extension: 'pdf',
-    filesize: '24.6 MB',
-    language: 'English',
-    rating: 4.9,
-    isbn: '978-1-718-50310-6',
-    pages: '560 页',
-    quality: 'Official Digital Release',
-    coverUrl: generateBookCoverSvg('Rust Programming 2nd Ed', 'Steve Klabnik, Carol Nichols', '#701a75', '#a21caf', 'Systems Lang', 'pdf', '978-1-718-50310-6'),
-    description: 'Authoritative guide to memory-safe and concurrent systems programming in Rust.',
-    downloadsCount: 84200
-  },
-  {
-    id: 'zlib-8',
-    title: '人类简史：从动物到上帝',
-    author: '尤瓦尔·赫拉利 (Yuval Noah Harari)',
-    year: '2017',
-    publisher: '中信出版社',
-    extension: 'epub',
-    filesize: '15.3 MB',
-    language: 'Chinese',
-    rating: 4.8,
-    isbn: '978-7-508-64735-7',
-    pages: '440 页',
-    quality: '官方插图精校版',
-    coverUrl: generateBookCoverSvg('人类简史', '尤瓦尔·赫拉利', '#713f12', '#ca8a04', '历史社科', 'epub', '978-7-508-64735-7'),
-    description: '从认知革命、农业革命到科学革命，全景式审视智人如何统治地球。',
-    downloadsCount: 312000
-  },
-  {
-    id: 'zlib-9',
-    title: '算法导论 (Introduction to Algorithms 4th Edition)',
-    author: 'Thomas H. Cormen, Charles E. Leiserson',
-    year: '2022',
-    publisher: 'MIT Press',
-    extension: 'pdf',
-    filesize: '78.5 MB',
-    language: 'English',
-    rating: 4.9,
-    isbn: '978-0-262-04630-5',
-    pages: '1312 页',
-    quality: 'MIT Press 官方高清版',
-    coverUrl: generateBookCoverSvg('Introduction to Algorithms', 'Thomas H. Cormen', '#155e75', '#0e7490', '算法理论', 'pdf', '978-0-262-04630-5'),
-    description: 'The definitive reference for algorithms worldwide.',
-    downloadsCount: 189400
-  },
-  {
-    id: 'zlib-10',
-    title: '百年孤独 (One Hundred Years of Solitude)',
-    author: '加西亚·马尔克斯 (Gabriel García Márquez)',
-    year: '2017',
-    publisher: '南海出版公司',
-    extension: 'epub',
-    filesize: '8.6 MB',
-    language: 'Chinese',
-    rating: 4.9,
-    isbn: '978-7-544-25399-4',
-    pages: '360 页',
-    quality: '范晔译本正版授权',
-    coverUrl: generateBookCoverSvg('百年孤独', '加西亚·马尔克斯', '#14532d', '#166534', '世界名著', 'epub', '978-7-544-25399-4'),
-    description: '魔幻现实主义文学巅峰之作，布恩迪亚家族七代人的百年传奇。',
-    downloadsCount: 340100
-  },
-  {
-    id: 'zlib-11',
-    title: '经济学原理 (微观+宏观分册 第8版)',
-    author: 'N. 格里高利·曼昆 (N. Gregory Mankiw)',
-    year: '2020',
-    publisher: '北京大学出版社',
-    extension: 'pdf',
-    filesize: '84.2 MB',
-    language: 'Chinese',
-    rating: 4.8,
-    isbn: '978-7-301-31102-8',
-    pages: '768 页',
-    quality: '北大出版社双色高清文字版',
-    coverUrl: generateBookCoverSvg('经济学原理 曼昆第8版', 'N. 格里高利·曼昆', '#78350f', '#b45309', '经济金融', 'pdf', '978-7-301-31102-8'),
-    description: '经典经济学入门读物，清晰阐释供给需求、市场效率与宏观经济波动。',
-    downloadsCount: 215000
   }
-];
+  const a = document.createElement('a');
+  a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.click();
+}
+
+function resolveMirrorAssetUrl(rawUrl: string | null | undefined, mirrorBase: string): string {
+  const val = (rawUrl || '').trim();
+  if (!val || val.startsWith('data:image/gif')) return '';
+  if (val.startsWith('http://') || val.startsWith('https://')) return val;
+  if (val.startsWith('//')) return `https:${val}`;
+  if (val.startsWith('/')) return `${mirrorBase}${val}`;
+  return `${mirrorBase}/${val}`;
+}
+
+export function isCloudflareChallengeHtml(html: string): boolean {
+  const lower = html.toLowerCase();
+  return (
+    lower.includes('just a moment...') ||
+    lower.includes('cf-browser-verification') ||
+    lower.includes('challenge-platform') ||
+    lower.includes('attention required! | cloudflare') ||
+    lower.includes('enable javascript and cookies to continue') ||
+    lower.includes('verifying your browser | diamwall') ||
+    lower.includes('__diamwall')
+  );
+}
+
+/**
+ * Parse real Z-Library mirror HTML (<z-bookcard> & classic .resItemBox) via DOMParser
+ */
+export function parseZlibMirrorHtmlClient(html: string, mirrorUrl: string): Book[] {
+  const base = normalizeMirrorBaseUrl(mirrorUrl);
+  if (!html || typeof DOMParser === 'undefined') return [];
+
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const books: Book[] = [];
+  const seenIds = new Set<string>();
+
+  // Strategy 1: Modern Z-Library <z-bookcard> web components
+  const cards = Array.from(doc.querySelectorAll('z-bookcard'));
+  for (const card of cards) {
+    const id = card.getAttribute('id') || `zlib-${books.length + 1}`;
+    if (seenIds.has(id)) continue;
+
+    const titleEl = card.querySelector('[slot="title"]');
+    const authorEl = card.querySelector('[slot="author"]');
+    const noteEl = card.querySelector('[slot="note"]');
+    const imgEl = card.querySelector('img');
+
+    const title = (titleEl?.textContent || card.getAttribute('title') || '').trim();
+    if (!title) continue;
+
+    seenIds.add(id);
+    const author = (authorEl?.textContent || card.getAttribute('author') || '未知作者').trim();
+    const href = card.getAttribute('href') || '';
+    const dlAttr = card.getAttribute('download') || '';
+    const rawCover =
+      imgEl?.getAttribute('data-src') ||
+      imgEl?.getAttribute('src') ||
+      card.getAttribute('cover') ||
+      '';
+
+    const ext = (card.getAttribute('extension') || 'pdf').replace(/^\./, '').toLowerCase();
+    const filesize = (card.getAttribute('filesize') || '未知大小').trim();
+    const year = (card.getAttribute('year') || '').trim() || '-';
+    const publisher = (card.getAttribute('publisher') || 'Z-Library').trim();
+    const language = (card.getAttribute('language') || '未知').trim();
+    const ratingRaw = parseFloat(card.getAttribute('rating') || '0');
+    const qualityRaw = card.getAttribute('quality') || '';
+    const isbn = (card.getAttribute('isbn') || '').trim();
+    const pages = (card.getAttribute('pages') || '').trim();
+
+    books.push({
+      id,
+      title,
+      author,
+      year,
+      publisher,
+      extension: ext || 'pdf',
+      filesize,
+      language,
+      rating: Number.isFinite(ratingRaw) && ratingRaw > 0 ? ratingRaw : 0,
+      coverUrl: resolveMirrorAssetUrl(rawCover, base),
+      description: (noteEl?.textContent || '').trim(),
+      downloadsCount: 0,
+      isbn: isbn || undefined,
+      pages: pages || undefined,
+      quality: qualityRaw || undefined,
+      detailUrl: href ? resolveMirrorAssetUrl(href, base) : base,
+      downloadUrl: dlAttr ? resolveMirrorAssetUrl(dlAttr, base) : undefined,
+      sourceMirror: base
+    });
+  }
+
+  if (books.length > 0) return books;
+
+  // Strategy 2: Classic .resItemBox / table.resItemTable layout
+  const itemBoxes = Array.from(doc.querySelectorAll('.resItemBox, table.resItemTable'));
+  for (const box of itemBoxes) {
+    const titleLink = box.querySelector('h3[itemprop="name"] a, h3 a, td a[href*="/book/"]');
+    const title = (titleLink?.textContent || '').trim();
+    if (!title) continue;
+
+    const href = titleLink?.getAttribute('href') || '';
+    const bookIdAttr = box.getAttribute('data-book_id') || '';
+    const isbnAttr = box.getAttribute('data-isbn') || '';
+    const idMatch = href.match(/\/book\/([^/?#]+)/);
+    const id = bookIdAttr || (idMatch ? idMatch[1] : `zlib-${books.length + 1}`);
+    if (seenIds.has(id)) continue;
+    seenIds.add(id);
+
+    const authors = Array.from(box.querySelectorAll('.authors a'))
+      .map((a) => (a.textContent || '').trim())
+      .filter(Boolean)
+      .join(', ');
+    const imgEl = box.querySelector('img.cover, img');
+    const rawCover = imgEl?.getAttribute('data-src') || imgEl?.getAttribute('src') || '';
+
+    const year = (box.querySelector('.property_year .property_value')?.textContent || '-').trim();
+    const publisher = (
+      box.querySelector('.property_publisher .property_value, a[title*="Publisher"], [itemprop="publisher"]')?.textContent || 'Z-Library'
+    ).trim();
+    const language = (
+      box.querySelector('.property_language .property_value')?.textContent || '未知'
+    ).trim();
+    const fileProp = (
+      box.querySelector('.property__file .property_value')?.textContent || ''
+    ).trim();
+    const [rawExt, rawSize] = fileProp.split(',').map((s) => s.trim());
+
+    books.push({
+      id,
+      title,
+      author: authors || '未知作者',
+      year,
+      publisher,
+      extension: (rawExt || 'pdf').toLowerCase(),
+      filesize: rawSize || '见详情页',
+      language,
+      rating: 0,
+      coverUrl: resolveMirrorAssetUrl(rawCover, base),
+      description: '',
+      downloadsCount: 0,
+      isbn: isbnAttr || undefined,
+      detailUrl: href ? resolveMirrorAssetUrl(href, base) : base,
+      sourceMirror: base
+    });
+  }
+
+  return books;
+}
 
 async function tryFetchJson(url: string, options?: RequestInit): Promise<any | null> {
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3500);
+    const timer = setTimeout(() => controller.abort(), 12000);
     const res = await fetch(url, { ...options, signal: controller.signal });
     clearTimeout(timer);
     const contentType = res.headers.get('content-type') || '';
@@ -315,10 +259,12 @@ export async function loginZlibAccount(payload: {
   email?: string;
   password?: string;
   cookieToken?: string;
-}): Promise<{ success: boolean; user?: UserAccount; error?: string }> {
+  mirrorUrl?: string;
+}): Promise<{ success: boolean; user?: UserAccount; error?: string; warning?: string }> {
   const email = (payload.email || '').trim();
   const password = payload.password || '';
   const cookieToken = (payload.cookieToken || '').trim();
+  const mirrorBase = normalizeMirrorBaseUrl(payload.mirrorUrl);
 
   if (!email && !cookieToken) {
     return { success: false, error: '请输入邮箱账号或 Remind-Me Cookie 凭证' };
@@ -327,34 +273,278 @@ export async function loginZlibAccount(payload: {
     return { success: false, error: '请输入登录密码' };
   }
 
-  // Try backend route first when running under Node full-stack server
+  // 1. Express Backend Proxy (dev / Node server mode)
   const serverData = await tryFetchJson('/api/zlib/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password, cookieToken })
+    body: JSON.stringify({ email, password, cookieToken, mirrorUrl: mirrorBase })
   });
   if (serverData && typeof serverData.success === 'boolean') {
     return serverData;
   }
 
-  // Standalone client fallback (Tauri .exe / Capacitor .apk / GitHub Pages static build)
-  const generatedId = `acc_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-  const userName = email
-    ? email.split('@')[0]
-    : `Zlib_User_${Math.floor(1000 + Math.random() * 9000)}`;
+  // 2. Tauri Desktop Native Rust HTTP Request (CORS-free directly to active mirror!)
+  const tauriInvoke = getTauriInvoke();
+  if (tauriInvoke) {
+    try {
+      if (email && password) {
+        // Check modern /api/auth-status + /login flow (e.g. z-lib.id)
+        let authMeta: any = null;
+        let sessionCookies: string[] = [];
+        try {
+          const statusResp = await tauriInvoke('mirror_http_request', {
+            url: `${mirrorBase}/api/auth-status`,
+            method: 'GET',
+            headers: { Accept: 'application/json', Referer: `${mirrorBase}/login` },
+            body: null
+          });
+          sessionCookies = Array.isArray(statusResp.setCookies) ? statusResp.setCookies : [];
+          if (statusResp.ok) {
+            authMeta = JSON.parse(statusResp.body || 'null');
+          }
+        } catch {
+          authMeta = null;
+        }
+
+        if (authMeta && authMeta.csrf_token) {
+          const cookiePair = sessionCookies.map((c) => c.split(';')[0].trim()).filter(Boolean).join('; ');
+          const loginResp = await tauriInvoke('mirror_http_request', {
+            url: `${mirrorBase}/login`,
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              Referer: `${mirrorBase}/login`,
+              Origin: mirrorBase,
+              ...(cookiePair ? { Cookie: cookiePair } : {})
+            },
+            body: new URLSearchParams({
+              _token: String(authMeta.csrf_token),
+              email,
+              password
+            }).toString()
+          });
+          const loginHtml = String(loginResp.body || '');
+          const afterCookies = [
+            cookiePair,
+            ...(Array.isArray(loginResp.setCookies) ? loginResp.setCookies.map((c: string) => c.split(';')[0].trim()) : [])
+          ].filter(Boolean).join('; ');
+
+          const verifyResp = await tauriInvoke('mirror_http_request', {
+            url: `${mirrorBase}/api/auth-status`,
+            method: 'GET',
+            headers: { Accept: 'application/json', ...(afterCookies ? { Cookie: afterCookies } : {}) },
+            body: null
+          });
+          const verifyJson: any = (() => {
+            try { return JSON.parse(verifyResp.body || 'null'); } catch { return null; }
+          })();
+
+          if (verifyJson?.authenticated && verifyJson?.user) {
+            return {
+              success: true,
+              user: {
+                id: `acc_${Date.now()}`,
+                email: verifyJson.user.email || email,
+                name: verifyJson.user.name || email.split('@')[0],
+                dailyDownloadsLimit: 10,
+                downloadsRemaining: 10,
+                isPremium: false,
+                remindMeToken: afterCookies,
+                loginMethod: 'password',
+                addedAt: new Date().toLocaleDateString('zh-CN'),
+                mirrorUrl: mirrorBase,
+                verified: true
+              }
+            };
+          }
+
+          if (/cf-turnstile|turnstile|captcha/i.test(loginHtml) || isCloudflareChallengeHtml(loginHtml)) {
+            return {
+              success: false,
+              error: `镜像站 (${mirrorBase}) 的账号密码登录页启用了人机验证码 (Turnstile/Captcha)，客户端无法代填验证码。请点击“在浏览器打开”完成登录后复制 Cookie 导入。`
+            };
+          }
+
+          return {
+            success: false,
+            error: `镜像站 (${mirrorBase}) 账号密码校验未通过，如开启了人机验证请使用浏览器登录后导出 Cookie 免密导入。`
+          };
+        }
+
+        // Classic Z-Library /rpc.php flow
+        const formBody = new URLSearchParams({
+          isModal: 'true',
+          email,
+          password,
+          action: 'login',
+          redirectUrl: '',
+          gg_json_mode: '1'
+        }).toString();
+
+        const resp = await tauriInvoke('mirror_http_request', {
+          url: `${mirrorBase}/rpc.php`,
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            Referer: mirrorBase,
+            Origin: mirrorBase
+          },
+          body: formBody
+        });
+
+        if (isCloudflareChallengeHtml(resp.body || '') || resp.status === 403 || resp.status === 513) {
+          return {
+            success: false,
+            error: `镜像站 (${mirrorBase}) 触发了人机验证 (HTTP ${resp.status})，无法通过密码直连。请点击“在浏览器打开”完成登录后复制 Cookie 免密导入。`
+          };
+        }
+
+        let parsed: any = null;
+        try {
+          parsed = JSON.parse(resp.body || '{}');
+        } catch {
+          parsed = null;
+        }
+
+        const respErr = parsed?.response?.validationError || parsed?.errors?.[0]?.message || parsed?.error;
+        if (respErr) {
+          return { success: false, error: `镜像站 (${mirrorBase}) 返回：${respErr}` };
+        }
+
+        const cookieList: string[] = Array.isArray(resp.setCookies) ? resp.setCookies : [];
+        const extractedCookie = cookieList
+          .map((c) => c.split(';')[0].trim())
+          .filter(Boolean)
+          .join('; ');
+
+        if (!extractedCookie && (!parsed || parsed?.response?.user_id === undefined)) {
+          return {
+            success: false,
+            error: `镜像站 (${mirrorBase}) 未返回登录会话凭证（HTTP ${resp.status}），请改用浏览器登录后提取 Cookie。`
+          };
+        }
+
+        return {
+          success: true,
+          user: {
+            id: `acc_${Date.now()}`,
+            email,
+            name: email.split('@')[0],
+            dailyDownloadsLimit: 10,
+            downloadsRemaining: 10,
+            isPremium: false,
+            remindMeToken: extractedCookie || cookieToken,
+            loginMethod: 'password',
+            addedAt: new Date().toLocaleDateString('zh-CN'),
+            mirrorUrl: mirrorBase,
+            verified: true
+          }
+        };
+      }
+
+      // Cookie verification via Tauri Rust: first check /api/auth-status
+      try {
+        const authResp = await tauriInvoke('mirror_http_request', {
+          url: `${mirrorBase}/api/auth-status`,
+          method: 'GET',
+          headers: { Cookie: formatCookieHeader(cookieToken), Accept: 'application/json' },
+          body: null
+        });
+        if (authResp.ok) {
+          const authJson = JSON.parse(authResp.body || 'null');
+          if (authJson && typeof authJson.authenticated === 'boolean') {
+            if (authJson.authenticated && authJson.user) {
+              return {
+                success: true,
+                user: {
+                  id: `acc_${Date.now()}`,
+                  email: authJson.user.email || `Cookie (${mirrorBase.replace(/^https?:\/\//, '')})`,
+                  name: authJson.user.name || 'Z-Lib 账号',
+                  dailyDownloadsLimit: 10,
+                  downloadsRemaining: 10,
+                  isPremium: false,
+                  remindMeToken: cookieToken,
+                  loginMethod: 'cookie',
+                  addedAt: new Date().toLocaleDateString('zh-CN'),
+                  mirrorUrl: mirrorBase,
+                  verified: true
+                }
+              };
+            }
+          }
+        }
+      } catch {
+        // fall through to homepage check
+      }
+
+      const resp = await tauriInvoke('mirror_http_request', {
+        url: `${mirrorBase}/`,
+        method: 'GET',
+        headers: {
+          Cookie: formatCookieHeader(cookieToken),
+          Referer: mirrorBase
+        },
+        body: null
+      });
+
+      const bodyText = String(resp.body || '');
+      const cfBlocked = isCloudflareChallengeHtml(bodyText) || resp.status === 403 || resp.status === 513;
+      const quotaMatch = bodyText.match(/(\d+)\s*\/\s*(\d+)/);
+      const isVip = !cfBlocked && /premium|vip|unlimited/i.test(bodyText) && Number(quotaMatch?.[2] || 0) > 20;
+
+      const limit = isVip ? Number(quotaMatch?.[2] || 999) : 10;
+      const remaining = quotaMatch ? Math.min(limit, Number(quotaMatch[1])) : limit;
+
+      return {
+        success: true,
+        warning: cfBlocked
+          ? `镜像站 (${mirrorBase}) 开启了人机拦截，Cookie 已保存并将用于代理尝试。`
+          : undefined,
+        user: {
+          id: `acc_${Date.now()}`,
+          email: `Cookie (${mirrorBase.replace(/^https?:\/\//, '')})`,
+          name: `Z-Lib 账号`,
+          dailyDownloadsLimit: limit,
+          downloadsRemaining: remaining,
+          isPremium: isVip,
+          remindMeToken: cookieToken,
+          loginMethod: 'cookie',
+          addedAt: new Date().toLocaleDateString('zh-CN'),
+          mirrorUrl: mirrorBase,
+          verified: !cfBlocked && resp.ok
+        }
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: `连接镜像站 (${mirrorBase}) 失败：${err?.message || String(err)}`
+      };
+    }
+  }
+
+  // 3. Static browser fallback (cannot bypass CORS without server/Tauri)
+  if (!cookieToken) {
+    return {
+      success: false,
+      error: `当前为纯前端浏览器环境，受浏览器跨域策略限制无法直接向镜像站 (${mirrorBase}) 提交账号密码。请在浏览器打开镜像登录后使用 Remind-Me Cookie 导入。`
+    };
+  }
 
   return {
     success: true,
+    warning: `当前为纯前端静态页面，已绑定镜像 ${mirrorBase} 并保存 Cookie（每日默认非 VIP 10 本额度）。`,
     user: {
-      id: generatedId,
-      email: email || `token_${cookieToken.slice(0, 8)}...`,
-      name: userName,
-      dailyDownloadsLimit: 999,
-      downloadsRemaining: Math.floor(850 + Math.random() * 140),
-      isPremium: true,
-      remindMeToken: cookieToken || 'zlib_session_token_sec_' + Math.random().toString(36).substring(2),
-      loginMethod: email ? 'password' : 'cookie',
-      addedAt: new Date().toLocaleDateString('zh-CN')
+      id: `acc_${Date.now()}`,
+      email: `Cookie (${mirrorBase.replace(/^https?:\/\//, '')})`,
+      name: `Z-Lib 账号`,
+      dailyDownloadsLimit: 10,
+      downloadsRemaining: 10,
+      isPremium: false,
+      remindMeToken: cookieToken,
+      loginMethod: 'cookie',
+      addedAt: new Date().toLocaleDateString('zh-CN'),
+      mirrorUrl: mirrorBase,
+      verified: false
     }
   };
 }
@@ -367,7 +557,21 @@ export async function searchZlibBooks(params: {
   exact?: boolean;
   yearFrom?: string;
   yearTo?: string;
-}): Promise<{ success: boolean; books: Book[]; total: number }> {
+  page?: number;
+  mirrorUrl?: string;
+  cookieToken?: string;
+}): Promise<{
+  success: boolean;
+  books: Book[];
+  total: number;
+  mirrorUrl: string;
+  mirrorSearchUrl: string;
+  blockedByCloudflare?: boolean;
+  error?: string;
+}> {
+  const mirrorBase = normalizeMirrorBaseUrl(params.mirrorUrl);
+  const mirrorSearchUrl = buildMirrorSearchUrl(params);
+
   const searchParams = new URLSearchParams();
   if (params.q?.trim()) searchParams.append('q', params.q.trim());
   if (params.field && params.field !== 'all') searchParams.append('field', params.field);
@@ -376,91 +580,495 @@ export async function searchZlibBooks(params: {
   if (params.exact) searchParams.append('exact', 'true');
   if (params.yearFrom) searchParams.append('yearFrom', params.yearFrom);
   if (params.yearTo) searchParams.append('yearTo', params.yearTo);
+  if (params.page && params.page > 1) searchParams.append('page', String(params.page));
+  searchParams.append('mirrorUrl', mirrorBase);
 
-  const serverData = await tryFetchJson(`/api/zlib/search?${searchParams.toString()}`);
-  if (serverData?.success && Array.isArray(serverData.books)) {
-    return serverData;
-  }
-
-  // Standalone static search fallback
-  const query = (params.q || '').trim().toLowerCase();
-  const field = (params.field || 'all').toLowerCase();
-  const lang = params.lang || 'all';
-  const ext = params.ext || 'all';
-  const exact = !!params.exact;
-  const yearFrom = parseInt(params.yearFrom || '0') || 0;
-  const yearTo = parseInt(params.yearTo || '9999') || 9999;
-
-  let results = STANDALONE_BOOKS.filter((b) => {
-    let matchQuery = true;
-    if (query) {
-      if (exact) {
-        if (field === 'title') matchQuery = b.title.toLowerCase() === query;
-        else if (field === 'author') matchQuery = b.author.toLowerCase() === query;
-        else if (field === 'isbn') matchQuery = (b.isbn || '').toLowerCase().replace(/-/g, '') === query.replace(/-/g, '');
-        else if (field === 'publisher') matchQuery = b.publisher.toLowerCase() === query;
-        else matchQuery = b.title.toLowerCase() === query || b.author.toLowerCase() === query;
-      } else {
-        if (field === 'title') matchQuery = b.title.toLowerCase().includes(query);
-        else if (field === 'author') matchQuery = b.author.toLowerCase().includes(query);
-        else if (field === 'isbn') matchQuery = (b.isbn || '').toLowerCase().includes(query) || (b.isbn || '').replace(/-/g, '').includes(query.replace(/-/g, ''));
-        else if (field === 'publisher') matchQuery = b.publisher.toLowerCase().includes(query);
-        else matchQuery = b.title.toLowerCase().includes(query) || b.author.toLowerCase().includes(query) || b.publisher.toLowerCase().includes(query) || (b.isbn || '').includes(query) || b.description.toLowerCase().includes(query);
-      }
-    }
-    const matchLang = lang === 'all' || b.language.toLowerCase() === lang.toLowerCase();
-    const matchExt = ext === 'all' || b.extension.toLowerCase() === ext.toLowerCase();
-    const bookYear = parseInt(b.year || '0');
-    const matchYear = (yearFrom === 0 || bookYear >= yearFrom) && (yearTo === 9999 || bookYear <= yearTo);
-    return matchQuery && matchLang && matchExt && matchYear;
+  // 1. Express Backend Proxy (Node full-stack mode)
+  const serverData = await tryFetchJson(`/api/zlib/search?${searchParams.toString()}`, {
+    headers: params.cookieToken
+      ? { 'x-zlib-cookie': formatCookieHeader(params.cookieToken) }
+      : undefined
   });
-
-  if (results.length === 0 && query) {
-    const capitalized = query.charAt(0).toUpperCase() + query.slice(1);
-    const chosenExt = ext === 'all' ? 'pdf' : ext;
-    results = [
-      {
-        id: `zlib-dyn-${Date.now()}-1`,
-        title: `${capitalized}: Principles, Theory and Practice`,
-        author: `Prof. Alex ${capitalized}son`,
-        year: '2023',
-        publisher: 'Springer Nature',
-        extension: chosenExt,
-        filesize: '28.4 MB',
-        language: lang === 'Chinese' ? 'Chinese' : 'English',
-        rating: 4.8,
-        isbn: '978-3-030-84512-4',
-        pages: '498 页',
-        quality: 'Springer 官方高清文字版',
-        coverUrl: generateBookCoverSvg(`${capitalized}: Theory & Practice`, `Prof. Alex ${capitalized}son`, '#1e293b', '#2563eb', query, chosenExt, '978-3-030-84512-4'),
-        description: `Comprehensive monograph covering ${query} foundations and architecture patterns.`,
-        downloadsCount: 42100
-      },
-      {
-        id: `zlib-dyn-${Date.now()}-2`,
-        title: `实战 ${query}：从入门到架构进阶指南`,
-        author: '技术专家委员会',
-        year: '2024',
-        publisher: '电子工业出版社',
-        extension: ext === 'all' ? 'epub' : ext,
-        filesize: '16.8 MB',
-        language: 'Chinese',
-        rating: 4.9,
-        isbn: '978-7-121-43210-9',
-        pages: '380 页',
-        quality: '官方全彩精排 EPUB',
-        coverUrl: generateBookCoverSvg(`实战 ${query}`, '技术专家委员会', '#311042', '#7c3aed', query, ext === 'all' ? 'epub' : ext, '978-7-121-43210-9'),
-        description: `针对 ${query} 的深度实战指南，涵盖底层剖析到生产环境高可用落地。`,
-        downloadsCount: 68500
-      }
-    ];
+  if (serverData && Array.isArray(serverData.books)) {
+    return {
+      success: !!serverData.success,
+      books: serverData.books,
+      total: serverData.total ?? serverData.books.length,
+      mirrorUrl: serverData.mirrorUrl || mirrorBase,
+      mirrorSearchUrl: serverData.mirrorSearchUrl || mirrorSearchUrl,
+      blockedByCloudflare: serverData.blockedByCloudflare,
+      error: serverData.error
+    };
   }
 
-  return { success: true, books: results, total: results.length };
+  // 2. Tauri Desktop Native Rust HTTP Request (CORS-free directly to active mirror!)
+  const tauriInvoke = getTauriInvoke();
+  if (tauriInvoke) {
+    try {
+      const headers: Record<string, string> = {
+        Referer: `${mirrorBase}/`,
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+      };
+      if (params.cookieToken) {
+        headers.Cookie = formatCookieHeader(params.cookieToken);
+      }
+
+      let resp = await tauriInvoke('mirror_http_request', {
+        url: mirrorSearchUrl,
+        method: 'GET',
+        headers,
+        body: null
+      });
+
+      // Fallback between /s/... and /s?q=... if mirror returns 404
+      let finalSearchUrl = mirrorSearchUrl;
+      if (resp.status === 404 && params.q?.trim()) {
+        const altUrl = new URL(`${mirrorBase}/s`);
+        altUrl.searchParams.set('q', params.q.trim());
+        finalSearchUrl = altUrl.toString();
+        resp = await tauriInvoke('mirror_http_request', {
+          url: finalSearchUrl,
+          method: 'GET',
+          headers,
+          body: null
+        });
+      }
+
+      const html = String(resp.body || '');
+      if (isCloudflareChallengeHtml(html) || resp.status === 403 || resp.status === 503 || resp.status === 513) {
+        return {
+          success: false,
+          books: [],
+          total: 0,
+          mirrorUrl: mirrorBase,
+          mirrorSearchUrl: finalSearchUrl,
+          blockedByCloudflare: true,
+          error: `镜像节点 (${mirrorBase}) 触发了人机拦截 (HTTP ${resp.status})。请尝试切换至 https://z-lib.id，或点击下方按钮在浏览器打开镜像搜索结果页。`
+        };
+      }
+
+      if (!resp.ok) {
+        return {
+          success: false,
+          books: [],
+          total: 0,
+          mirrorUrl: mirrorBase,
+          mirrorSearchUrl: finalSearchUrl,
+          error: `镜像节点 (${mirrorBase}) 返回状态码 HTTP ${resp.status}，请尝试切换镜像节点。`
+        };
+      }
+
+      const parsedBooks = parseZlibMirrorHtmlClient(html, mirrorBase);
+      return {
+        success: true,
+        books: parsedBooks,
+        total: parsedBooks.length,
+        mirrorUrl: mirrorBase,
+        mirrorSearchUrl: finalSearchUrl
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        books: [],
+        total: 0,
+        mirrorUrl: mirrorBase,
+        mirrorSearchUrl,
+        error: `无法连接镜像节点 (${mirrorBase})：${err?.message || String(err)}。请检查网络或切换镜像节点。`
+      };
+    }
+  }
+
+  // 3. Browser / Capacitor direct fetch attempt (no fake fabricated results!)
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(mirrorSearchUrl, { signal: controller.signal });
+    clearTimeout(timer);
+    const html = await res.text();
+    if (isCloudflareChallengeHtml(html) || res.status === 403) {
+      return {
+        success: false,
+        books: [],
+        total: 0,
+        mirrorUrl: mirrorBase,
+        mirrorSearchUrl,
+        blockedByCloudflare: true,
+        error: `镜像节点 (${mirrorBase}) 需要人机验证 (HTTP ${res.status})，请点击下方按钮直接在浏览器打开镜像搜索结果。`
+      };
+    }
+    const parsedBooks = parseZlibMirrorHtmlClient(html, mirrorBase);
+    return {
+      success: true,
+      books: parsedBooks,
+      total: parsedBooks.length,
+      mirrorUrl: mirrorBase,
+      mirrorSearchUrl
+    };
+  } catch {
+    return {
+      success: false,
+      books: [],
+      total: 0,
+      mirrorUrl: mirrorBase,
+      mirrorSearchUrl,
+      error: `当前纯静态网页受浏览器跨域 (CORS) 限制，无法后台静默抓取 ${mirrorBase}。请使用本地 Node 服务 / Windows 桌面客户端，或点击下方按钮直达镜像搜索页。`
+    };
+  }
+}
+
+// ========================
+// IndexedDB Local Book File Storage (for Browser / Android APK / Web Preview)
+// ========================
+export interface StoredLocalBookRecord {
+  bookId: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  updatedAt: string;
+  blob: Blob;
+}
+
+const IDB_NAME = 'zlib_local_books_db';
+const IDB_STORE = 'book_files';
+
+function openBookDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') {
+      reject(new Error('IndexedDB unavailable'));
+      return;
+    }
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) {
+        db.createObjectStore(IDB_STORE, { keyPath: 'bookId' });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function saveLocalBookBlob(
+  bookId: string,
+  filename: string,
+  mimeType: string,
+  blob: Blob
+): Promise<void> {
+  try {
+    const db = await openBookDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      const store = tx.objectStore(IDB_STORE);
+      store.put({
+        bookId,
+        filename,
+        mimeType: mimeType || blob.type || 'application/octet-stream',
+        size: blob.size,
+        updatedAt: new Date().toISOString(),
+        blob
+      } as StoredLocalBookRecord);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    // ignore storage quota errors gracefully
+  }
+}
+
+export async function getLocalBookBlob(bookId: string): Promise<StoredLocalBookRecord | null> {
+  try {
+    const db = await openBookDb();
+    return await new Promise<StoredLocalBookRecord | null>((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const req = tx.objectStore(IDB_STORE).get(bookId);
+      req.onsuccess = () => resolve((req.result as StoredLocalBookRecord) || null);
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return null;
+  }
+}
+
+export async function listLocalBookBlobs(): Promise<StoredLocalBookRecord[]> {
+  try {
+    const db = await openBookDb();
+    return await new Promise<StoredLocalBookRecord[]>((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const req = tx.objectStore(IDB_STORE).getAll();
+      req.onsuccess = () => resolve((req.result as StoredLocalBookRecord[]) || []);
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return [];
+  }
+}
+
+export async function deleteLocalBookBlob(bookId: string): Promise<void> {
+  try {
+    const db = await openBookDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).delete(bookId);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    // ignore
+  }
+}
+
+export interface LocalFolderFileItem {
+  bookId?: string;
+  name: string;
+  size: number;
+  path?: string;
+  mtime?: string;
+  source: 'disk' | 'browser';
+}
+
+export async function openDownloadFolder(): Promise<{
+  mode: 'native' | 'virtual';
+  path: string;
+  files: LocalFolderFileItem[];
+}> {
+  const tauriInvoke = getTauriInvoke();
+  if (tauriInvoke) {
+    try {
+      const dirPath = await tauriInvoke('open_download_folder');
+      return { mode: 'native', path: String(dirPath || ''), files: [] };
+    } catch {
+      // fall through
+    }
+  }
+
+  const serverData = await tryFetchJson('/api/system/open-folder', { method: 'POST' });
+  const browserRecords = await listLocalBookBlobs();
+  const browserFiles: LocalFolderFileItem[] = browserRecords.map((r) => ({
+    bookId: r.bookId,
+    name: r.filename,
+    size: r.size,
+    mtime: r.updatedAt,
+    source: 'browser'
+  }));
+
+  if (serverData && serverData.success) {
+    if (serverData.opened) {
+      return {
+        mode: 'native',
+        path: serverData.path || '',
+        files: browserFiles
+      };
+    }
+    const diskFiles: LocalFolderFileItem[] = Array.isArray(serverData.files)
+      ? serverData.files.map((f: any) => ({
+          name: f.name,
+          size: Number(f.size || 0),
+          path: f.path,
+          mtime: f.mtime,
+          source: 'disk' as const
+        }))
+      : [];
+    return {
+      mode: 'virtual',
+      path: serverData.path || 'ZLibraryDownloads',
+      files: [...diskFiles, ...browserFiles]
+    };
+  }
+
+  return {
+    mode: 'virtual',
+    path: '浏览器 / 手机本地沙盒书库',
+    files: browserFiles
+  };
+}
+
+export async function openBookLocally(book: Book): Promise<{
+  mode: 'native' | 'reader' | 'needs-file';
+  path?: string;
+  blob?: Blob;
+  serverFileUrl?: string;
+  filename?: string;
+  mimeType?: string;
+  error?: string;
+}> {
+  // 1. Tauri Desktop native OS file opener
+  const tauriInvoke = getTauriInvoke();
+  if (tauriInvoke && book.savedPath) {
+    try {
+      const openedPath = await tauriInvoke('open_local_book', {
+        path: book.savedPath,
+        fallbackUrl: null
+      });
+      return { mode: 'native', path: String(openedPath || book.savedPath) };
+    } catch {
+      // fall through to IndexedDB / file picker if moved
+    }
+  }
+
+  // 2. IndexedDB cached binary blob
+  const cached = await getLocalBookBlob(book.id);
+  if (cached && cached.blob) {
+    return {
+      mode: 'reader',
+      blob: cached.blob,
+      filename: cached.filename,
+      mimeType: cached.mimeType
+    };
+  }
+
+  // 3. Express local saved file on server disk
+  const candidateName =
+    book.localFileName ||
+    (book.savedPath ? book.savedPath.split(/[\\/]/).pop() : undefined);
+  if (candidateName) {
+    try {
+      const checkUrl = `/api/system/local-file?name=${encodeURIComponent(candidateName)}`;
+      const res = await fetch(checkUrl, { method: 'GET' });
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && !contentType.includes('application/json')) {
+        const blob = await res.blob();
+        await saveLocalBookBlob(book.id, candidateName, contentType, blob);
+        return {
+          mode: 'reader',
+          blob,
+          serverFileUrl: checkUrl,
+          filename: candidateName,
+          mimeType: contentType
+        };
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  return {
+    mode: 'needs-file',
+    filename: candidateName || `${book.title}.${book.extension || 'pdf'}`,
+    error: '未检测到该书的本地文件缓存（可能由早期版本记录或直接从浏览器下载）。您可以从本地目录选择该电子书文件立即阅读。'
+  };
+}
+
+export async function downloadBookFromMirror(
+  book: Book,
+  mirrorUrl?: string,
+  cookieToken?: string
+): Promise<{
+  success: boolean;
+  savedPath?: string;
+  localFileName?: string;
+  requiresBrowser?: boolean;
+  targetUrl: string;
+  error?: string;
+}> {
+  const mirrorBase = normalizeMirrorBaseUrl(mirrorUrl || book.sourceMirror);
+  const targetUrl = book.downloadUrl || book.detailUrl || `${mirrorBase}/s/${encodeURIComponent(book.title)}`;
+  const ext = (book.extension || 'pdf').replace(/^\./, '');
+  const cleanTitle = (book.title || 'zlib-book').replace(/[\\/:*?"<>|]/g, '_');
+  const filename = `${cleanTitle}.${ext}`;
+
+  // 1. Express Server Download Proxy
+  const isNodeAvailable = await tryFetchJson('/api/zlib/mirrors');
+  if (isNodeAvailable) {
+    try {
+      const dlApi = new URL('/api/zlib/download', window.location.origin);
+      dlApi.searchParams.set('url', targetUrl);
+      dlApi.searchParams.set('mirrorUrl', mirrorBase);
+      dlApi.searchParams.set('filename', filename);
+      if (cookieToken) dlApi.searchParams.set('cookie', formatCookieHeader(cookieToken));
+
+      const res = await fetch(dlApi.toString());
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && !contentType.includes('application/json') && !contentType.includes('text/html')) {
+        const blob = await res.blob();
+        await saveLocalBookBlob(book.id, filename, contentType, blob);
+        const rawSavedHeader = res.headers.get('x-saved-path');
+        const savedPath = rawSavedHeader ? decodeURIComponent(rawSavedHeader) : undefined;
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(blobUrl);
+        return { success: true, savedPath, localFileName: filename, targetUrl };
+      }
+
+      if (contentType.includes('application/json')) {
+        const errJson = await res.json();
+        return {
+          success: false,
+          requiresBrowser: !!errJson.requiresBrowser,
+          targetUrl: errJson.targetUrl || targetUrl,
+          error: errJson.error || '镜像站未直接返回文件流'
+        };
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  // 2. Tauri Rust Native Binary Download
+  const tauriInvoke = getTauriInvoke();
+  if (tauriInvoke) {
+    try {
+      const headers: Record<string, string> = { Referer: book.detailUrl || mirrorBase };
+      if (cookieToken) headers.Cookie = formatCookieHeader(cookieToken);
+
+      // If book only has detailUrl (not direct /dl/ link), first inspect detail page for real /dl/ href
+      let finalDlUrl = targetUrl;
+      if (!book.downloadUrl && book.detailUrl) {
+        const detailResp = await tauriInvoke('mirror_http_request', {
+          url: book.detailUrl,
+          method: 'GET',
+          headers,
+          body: null
+        });
+        const dlMatch = String(detailResp.body || '').match(/href=["'](\/dl\/[^"']+)["']/i);
+        if (dlMatch) {
+          finalDlUrl = `${mirrorBase}${dlMatch[1]}`;
+        }
+      }
+
+      const result = await tauriInvoke('mirror_download_file', {
+        url: finalDlUrl,
+        headers,
+        filename
+      });
+
+      if (result.ok && result.savedPath) {
+        return { success: true, savedPath: result.savedPath, localFileName: filename, targetUrl: finalDlUrl };
+      }
+      return {
+        success: false,
+        requiresBrowser: true,
+        targetUrl: result.finalUrl || finalDlUrl,
+        error: `镜像站 (${mirrorBase}) 返回网页验证或配额提示 (HTTP ${result.status})，请在浏览器打开完成下载。`
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        requiresBrowser: true,
+        targetUrl,
+        error: err?.message || '下载请求失败，请在浏览器打开镜像页面下载'
+      };
+    }
+  }
+
+  // 3. Static browser fallback: open real mirror book page directly
+  return {
+    success: false,
+    requiresBrowser: true,
+    targetUrl,
+    error: `纯前端页面受跨域策略限制无法代理二进制下载，将为您跳转到镜像节点原书页完成下载/导出。`
+  };
 }
 
 export async function testMirrorsLatency(currentMirrors: Mirror[]): Promise<Mirror[]> {
-  const serverData = await tryFetchJson('/api/zlib/mirrors/test', { method: 'POST' });
+  const serverData = await tryFetchJson('/api/zlib/mirrors/test', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mirrors: currentMirrors })
+  });
   if (serverData?.success && Array.isArray(serverData.mirrors)) {
     const activeId = currentMirrors.find((m) => m.active)?.id;
     return serverData.mirrors.map((m: Mirror) => ({
@@ -469,28 +1077,51 @@ export async function testMirrorsLatency(currentMirrors: Mirror[]): Promise<Mirr
     }));
   }
 
-  // Standalone browser / Tauri / Capacitor direct latency measurement
+  const tauriInvoke = getTauriInvoke();
   const tested = await Promise.all(
     currentMirrors.map(async (m) => {
-      const targetUrl = m.url.startsWith('http') ? m.url : `https://${m.url}`;
+      const targetUrl = normalizeMirrorBaseUrl(m.url);
       const t0 = performance.now();
+      if (tauriInvoke) {
+        try {
+          const resp = await tauriInvoke('mirror_http_request', {
+            url: targetUrl,
+            method: 'GET',
+            headers: {},
+            body: null
+          });
+          const ms = Math.max(20, Math.round(performance.now() - t0));
+          const ok = resp.status > 0 && resp.status < 500;
+          return {
+            ...m,
+            status: (ok ? (ms < 1200 ? 'online' : 'unstable') : 'offline') as Mirror['status'],
+            latency: `${ms}ms`
+          };
+        } catch {
+          return {
+            ...m,
+            status: 'offline' as Mirror['status'],
+            latency: '超时/不可达'
+          };
+        }
+      }
+
       try {
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 3000);
+        const timer = setTimeout(() => controller.abort(), 3500);
         await fetch(targetUrl, { mode: 'no-cors', signal: controller.signal });
         clearTimeout(timer);
-        const ms = Math.max(60, Math.round(performance.now() - t0));
+        const ms = Math.max(30, Math.round(performance.now() - t0));
         return {
           ...m,
-          status: (ms < 500 ? 'online' : 'unstable') as Mirror['status'],
+          status: (ms < 1200 ? 'online' : 'unstable') as Mirror['status'],
           latency: `${ms}ms`
         };
       } catch {
-        const fallbackMs = Math.floor(110 + Math.random() * 240);
         return {
           ...m,
-          status: 'online' as Mirror['status'],
-          latency: `${fallbackMs}ms`
+          status: 'offline' as Mirror['status'],
+          latency: '不可达'
         };
       }
     })
@@ -514,8 +1145,7 @@ export async function generateAISummaryClient(
   });
   if (serverData) return serverData;
 
-  // Standalone direct API call (used inside Tauri .exe / Capacitor .apk / Static pages)
-  const prompt = `请作为一名资深学者与书评专家，为书籍《${book.title}》（作者：${book.author}）撰写一份结构清晰、内容深入的中文专业导读与精读报告。书籍原始简介如下：“${book.description}”。
+  const prompt = `请作为一名资深学者与书评专家，为书籍《${book.title}》（作者：${book.author}）撰写一份结构清晰、内容深入的中文专业导读与精读报告。书籍原始简介如下：“${book.description || '无'}”。
 请严格使用中文按以下四个模块排版输出：
 1. 【核心内容全景概览】
 2. 【必读核心概念与理论拆解】
@@ -529,7 +1159,7 @@ export async function generateAISummaryClient(
   if (!apiKey) {
     return {
       success: false,
-      error: '当前运行在独立离线/静态模式（桌面 .exe / 手机 .apk / 静态站点），无法调用服务端内置环境变量。请点击左下角“切换 AI 模型/API”，在设置中填写您自己的 Gemini / OpenAI / DeepSeek API Key 后即可直接直连使用！'
+      error: '当前运行在独立客户端/静态模式，请在「全局设置 → AI 导读大模型多 API 管理中心」中填入您自己的 Gemini / OpenAI / DeepSeek API Key 后直接调用。'
     };
   }
 
@@ -660,7 +1290,7 @@ export async function getPackagerConfigFilesClient(): Promise<Record<string, str
           beforeBuildCommand: '',
           devPath: 'http://localhost:3000',
           distDir: '../dist',
-          withGlobalTauri: false
+          withGlobalTauri: true
         },
         package: { productName: 'zlib-downloader', version: '1.2.0' },
         tauri: {
@@ -679,24 +1309,115 @@ export async function getPackagerConfigFilesClient(): Promise<Record<string, str
       2
     ),
     'build_tauri.bat': `@echo off
-echo Building Z-Library Downloader Tauri App (.exe)...
-call npm install --legacy-peer-deps
-call npm run build
-call npx --yes @tauri-apps/cli@1.5 build
+chcp 65001 >nul
+where node >nul 2>nul || (echo [错误] 请先安装 Node.js 20/22+ & pause & exit /b 1)
+where cargo >nul 2>nul || (echo [错误] 请先安装 Rustup & pause & exit /b 1)
+call npm install --legacy-peer-deps || (pause & exit /b 1)
+call npm run build || (pause & exit /b 1)
+call npx --yes @tauri-apps/cli@1.5 build || (pause & exit /b 1)
 pause`,
     'build_android_apk.bat': `@echo off
-call npm install --legacy-peer-deps
-call npm run build
+chcp 65001 >nul
+where node >nul 2>nul || (echo [错误] 请先安装 Node.js 20/22+ & pause & exit /b 1)
+where java >nul 2>nul || (echo [错误] 请先安装 JDK 17 & pause & exit /b 1)
+call npm install --legacy-peer-deps || (pause & exit /b 1)
+call npm run build || (pause & exit /b 1)
 if not exist android (
-  call npm install --legacy-peer-deps @capacitor/core@^6.2.0 @capacitor/cli@^6.2.0 @capacitor/android@^6.2.0
-  call npx cap add android
+  call npm install --legacy-peer-deps @capacitor/core@^6.2.0 @capacitor/cli@^6.2.0 @capacitor/android@^6.2.0 || (pause & exit /b 1)
+  call npx cap add android || (pause & exit /b 1)
 )
-call npx cap sync android
+call npx cap sync android || (pause & exit /b 1)
 cd android
-call gradlew.bat assembleDebug
+call gradlew.bat assembleDebug || (cd .. & pause & exit /b 1)
+cd ..
 pause`,
-    '.github/workflows/build-release.yml': `# See .github/workflows/build-release.yml in repository root
-# Uses ubuntu-24.04 & windows-latest with Node 22 + JDK 17 + Rust stable`
+    '.github/workflows/build-release.yml': `name: 自动编译 Windows EXE 与 Android APK 安装包
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-android-apk:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+      - name: 构建 Web 并编译 Android APK
+        run: |
+          npm install --legacy-peer-deps
+          npm run build
+          npm install --legacy-peer-deps @capacitor/core@^6.2.0 @capacitor/cli@^6.2.0 @capacitor/android@^6.2.0
+          npx cap add android || true
+          npx cap sync android
+          cd android && chmod +x ./gradlew && ./gradlew assembleDebug
+      - name: 上传 APK 构建产物
+        uses: actions/upload-artifact@v6
+        with:
+          name: zlib-downloader-android-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: warn
+
+  build-windows-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - name: 构建 Tauri Windows EXE
+        run: |
+          npm install --legacy-peer-deps
+          npm run build
+          npx --yes @tauri-apps/cli@1.5 build
+      - name: 上传 EXE 构建产物
+        uses: actions/upload-artifact@v6
+        with:
+          name: zlib-downloader-windows-exe
+          path: |
+            src-tauri/target/release/zlib-downloader.exe
+            src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: warn`,
+    '.github/workflows/deploy.yml': `name: 打包并推送部署至 GitHub Pages (gh-pages 分支)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm install --legacy-peer-deps
+      - run: npm run build
+      - uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: \${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+          publish_branch: gh-pages
+          force_orphan: true`
   };
 }
-

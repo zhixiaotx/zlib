@@ -1,10 +1,28 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import os from "os";
+import { spawn } from "child_process";
 import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
 
 dotenv.config();
+
+function getLocalDownloadsDir(): string {
+  const candidates = [
+    path.resolve(os.homedir(), "Downloads", "ZLibraryDownloads"),
+    path.resolve(process.cwd(), "ZLibraryDownloads")
+  ];
+  for (const dir of candidates) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      return dir;
+    } catch {
+      // try next fallback
+    }
+  }
+  return process.cwd();
+}
 
 const app = express();
 app.use(express.json());
@@ -19,7 +37,7 @@ const ai = new GoogleGenAI({
   }
 });
 
-// Mock initial Z-Library database for search & download
+// Z-Library Book Schema (strictly parsed from active mirror URL)
 interface Book {
   id: string;
   title: string;
@@ -36,546 +54,623 @@ interface Book {
   isbn?: string;
   pages?: string;
   quality?: string;
+  detailUrl?: string;
+  downloadUrl?: string;
+  sourceMirror?: string;
 }
 
-function hash(str: string) {
-  let h = 0;
-  for (let i = 0; i < str.length; i++) {
-    h = (h << 5) - h + str.charCodeAt(i);
-    h |= 0;
+const DEFAULT_BROWSER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
+
+function normalizeMirrorUrl(raw?: string): string {
+  const cleaned = (raw || "https://z-lib.id").trim().replace(/\/+$/, "");
+  if (!cleaned) return "https://z-lib.id";
+  return cleaned.startsWith("http://") || cleaned.startsWith("https://")
+    ? cleaned
+    : `https://${cleaned}`;
+}
+
+function formatZlibCookie(token?: string): string {
+  const raw = (token || "").trim();
+  if (!raw) return "";
+  if (raw.includes("=")) return raw;
+  return `zlibrary_session=${raw}; remind_me=${raw}; remix_userkey=${raw}`;
+}
+
+function decodeHtmlEntities(str: string): string {
+  return str
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function stripTags(html: string): string {
+  return decodeHtmlEntities(html.replace(/<[^>]+>/g, " "));
+}
+
+function extractAttr(tag: string, attrName: string): string {
+  const re = new RegExp(`\\b${attrName}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, "i");
+  const m = tag.match(re);
+  return m ? decodeHtmlEntities(m[1] ?? m[2] ?? "") : "";
+}
+
+function resolveUrl(raw: string, base: string): string {
+  const v = (raw || "").trim();
+  if (!v || v.startsWith("data:image/gif")) return "";
+  if (v.startsWith("http://") || v.startsWith("https://")) return v;
+  if (v.startsWith("//")) return `https:${v}`;
+  if (v.startsWith("/")) return `${base}${v}`;
+  return `${base}/${v}`;
+}
+
+function formatMirrorNetworkError(err: any, mirrorBase: string): string {
+  const code = err?.cause?.code || err?.code || "";
+  const msg = String(err?.cause?.message || err?.message || err || "");
+  if (code === "CERT_HAS_EXPIRED" || /certificate has expired/i.test(msg)) {
+    return `镜像节点 (${mirrorBase}) SSL 证书已过期，节点不可用。请一键切换至在线镜像 (https://z-lib.id) 重试。`;
   }
-  return h;
+  if (code === "ENOTFOUND" || /getaddrinfo ENOTFOUND/i.test(msg)) {
+    return `镜像节点 (${mirrorBase}) 域名解析失败或已下线。请一键切换至在线镜像 (https://z-lib.id) 重试。`;
+  }
+  if (/redirect count exceeded/i.test(msg)) {
+    return `镜像节点 (${mirrorBase}) 触发反爬重定向校验，无法直接抓取。请一键切换至 https://z-lib.id 或在浏览器打开搜索页。`;
+  }
+  if (err?.name === "AbortError" || /aborted|timeout/i.test(msg)) {
+    return `连接镜像节点 (${mirrorBase}) 超时，请一键切换至可用镜像 (https://z-lib.id) 重试。`;
+  }
+  return `无法连接镜像节点 (${mirrorBase})：${msg}。请尝试切换至可用镜像 (https://z-lib.id) 或点击下方按钮直接打开镜像网页搜索。`;
 }
 
-function escapeXml(unsafe: string) {
-  return unsafe.replace(/[<>&'"]/g, (c) => {
-    switch (c) {
-      case '<': return '&lt;';
-      case '>': return '&gt;';
-      case '&': return '&amp;';
-      case '\'': return '&apos;';
-      case '"': return '&quot;';
-      default: return c;
+async function fetchWithCookieJar(
+  url: string,
+  opts: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string;
+    cookie?: string;
+    timeoutMs?: number;
+    maxRedirects?: number;
+  } = {}
+): Promise<{ res: Response; finalUrl: string; cookieHeader: string; setCookies: string[] }> {
+  const cookieMap = new Map<string, string>();
+  const seed = (opts.cookie || "").trim();
+  if (seed) {
+    seed.split(";").forEach((part) => {
+      const idx = part.indexOf("=");
+      if (idx > 0) {
+        cookieMap.set(part.slice(0, idx).trim(), part.slice(idx + 1).trim());
+      }
+    });
+  }
+
+  const allSetCookies: string[] = [];
+  let currentUrl = url;
+  let method = opts.method || "GET";
+  let body = opts.body;
+  const maxRedirects = opts.maxRedirects ?? 6;
+
+  for (let hop = 0; hop <= maxRedirects; hop++) {
+    const cookieStr = Array.from(cookieMap.entries())
+      .map(([k, v]) => `${k}=${v}`)
+      .join("; ");
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 15000);
+
+    try {
+      const reqHeaders: Record<string, string> = {
+        "User-Agent": DEFAULT_BROWSER_UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/json,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        ...(opts.headers || {})
+      };
+      if (cookieStr) {
+        reqHeaders["Cookie"] = cookieStr;
+      }
+
+      const res = await fetch(currentUrl, {
+        method,
+        headers: reqHeaders,
+        body: method === "GET" || method === "HEAD" ? undefined : body,
+        redirect: "manual",
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+
+      const getSetCookie = (res.headers as any).getSetCookie?.bind(res.headers);
+      const setCookies: string[] = getSetCookie ? getSetCookie() : [];
+      if (!setCookies.length) {
+        const single = res.headers.get("set-cookie");
+        if (single) setCookies.push(single);
+      }
+
+      for (const sc of setCookies) {
+        allSetCookies.push(sc);
+        const pair = sc.split(";")[0];
+        const eq = pair.indexOf("=");
+        if (eq > 0) {
+          cookieMap.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
+        }
+      }
+
+      if ([301, 302, 303, 307, 308].includes(res.status)) {
+        const loc = res.headers.get("location");
+        if (loc && hop < maxRedirects) {
+          currentUrl = new URL(loc, currentUrl).toString();
+          if (res.status === 303 || ((res.status === 301 || res.status === 302) && method === "POST")) {
+            method = "GET";
+            body = undefined;
+          }
+          continue;
+        }
+      }
+
+      const finalCookieHeader = Array.from(cookieMap.entries())
+        .map(([k, v]) => `${k}=${v}`)
+        .join("; ");
+      return { res, finalUrl: currentUrl, cookieHeader: finalCookieHeader, setCookies: allSetCookies };
+    } catch (err) {
+      clearTimeout(timer);
+      throw err;
     }
-  });
-}
-
-function generateCoverSvg(title: string, author: string, color1: string, color2: string, category: string, ext: string = 'EPUB', isbn: string = '978-0-0000-0000-0'): string {
-  const h = Math.abs(hash(title));
-  const safeTitle = escapeXml(title);
-  const safeAuthor = escapeXml(author);
-  const safeCat = escapeXml(category.toUpperCase());
-  const extColor = ext.toLowerCase() === 'pdf' ? '#ef4444' : ext.toLowerCase() === 'epub' ? '#10b981' : ext.toLowerCase() === 'mobi' ? '#3b82f6' : '#f59e0b';
-
-  // Artistic motif based on category
-  let artPattern = '';
-  if (category.includes('科幻') || category.includes('Sci-Fi')) {
-    artPattern = `
-      <circle cx="150" cy="115" r="45" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1.5" stroke-dasharray="4,4" />
-      <ellipse cx="150" cy="115" rx="65" ry="20" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="2" transform="rotate(-20 150 115)" />
-      <circle cx="150" cy="115" r="24" fill="rgba(255,255,255,0.2)" />
-      <circle cx="158" cy="107" r="18" fill="rgba(255,255,255,0.4)" />
-      <circle cx="95" cy="75" r="3" fill="#ffffff" opacity="0.9" />
-      <circle cx="215" cy="85" r="2.5" fill="#ffffff" opacity="0.8" />
-      <circle cx="190" cy="155" r="3" fill="#ffffff" opacity="0.85" />
-    `;
-  } else if (category.includes('计算') || category.includes('架构') || category.includes('System') || category.includes('Web') || category.includes('前端') || category.includes('Program') || category.includes('Rust')) {
-    artPattern = `
-      <rect x="95" y="80" width="110" height="70" rx="8" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="2" />
-      <text x="150" y="122" font-family="monospace" font-size="24" font-weight="bold" fill="rgba(255,255,255,0.85)" text-anchor="middle">&lt;/&gt;</text>
-      <circle cx="95" cy="115" r="5" fill="#38bdf8" />
-      <circle cx="205" cy="115" r="5" fill="#38bdf8" />
-      <line x1="150" y1="65" x2="150" y2="80" stroke="rgba(255,255,255,0.3)" stroke-width="2" />
-      <line x1="150" y1="150" x2="150" y2="165" stroke="rgba(255,255,255,0.3)" stroke-width="2" />
-    `;
-  } else if (category.includes('AI') || category.includes('智能') || category.includes('学习') || category.includes('Deep')) {
-    artPattern = `
-      <circle cx="125" cy="95" r="8" fill="rgba(255,255,255,0.5)" />
-      <circle cx="175" cy="95" r="8" fill="rgba(255,255,255,0.5)" />
-      <circle cx="110" cy="135" r="8" fill="rgba(255,255,255,0.5)" />
-      <circle cx="150" cy="130" r="11" fill="rgba(255,255,255,0.75)" />
-      <circle cx="190" cy="135" r="8" fill="rgba(255,255,255,0.5)" />
-      <line x1="125" y1="95" x2="150" y2="130" stroke="rgba(255,255,255,0.4)" stroke-width="2" />
-      <line x1="175" y1="95" x2="150" y2="130" stroke="rgba(255,255,255,0.4)" stroke-width="2" />
-      <line x1="110" y1="135" x2="150" y2="130" stroke="rgba(255,255,255,0.4)" stroke-width="2" />
-      <line x1="190" y1="135" x2="150" y2="130" stroke="rgba(255,255,255,0.4)" stroke-width="2" />
-    `;
-  } else {
-    artPattern = `
-      <circle cx="150" cy="115" r="38" fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.4)" stroke-width="2" />
-      <path d="M135 115 L150 100 L165 115 L150 130 Z" fill="rgba(255,255,255,0.5)" />
-      <line x1="105" y1="115" x2="195" y2="115" stroke="rgba(255,255,255,0.25)" stroke-width="1.5" />
-    `;
   }
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
-    <defs>
-      <linearGradient id="bg_${h}" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" stop-color="${color1}" />
-        <stop offset="100%" stop-color="${color2}" />
-      </linearGradient>
-      <linearGradient id="spine_${h}" x1="0%" y1="0%" x2="100%" y2="0%">
-        <stop offset="0%" stop-color="rgba(0,0,0,0.45)" />
-        <stop offset="70%" stop-color="rgba(0,0,0,0.15)" />
-        <stop offset="100%" stop-color="rgba(255,255,255,0.2)" />
-      </linearGradient>
-      <linearGradient id="gold_${h}" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" stop-color="#fbbf24" />
-        <stop offset="100%" stop-color="#d97706" />
-      </linearGradient>
-      <filter id="shadow_${h}" x="-10%" y="-10%" width="120%" height="120%">
-        <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="rgba(0,0,0,0.3)" />
-      </filter>
-    </defs>
-
-    <!-- Main Book Cover Background -->
-    <rect width="300" height="420" rx="10" fill="url(#bg_${h})" />
-
-    <!-- 3D Book Spine Shading & Crease -->
-    <rect x="0" y="0" width="24" height="420" rx="6" fill="url(#spine_${h})" />
-    <line x1="24" y1="0" x2="24" y2="420" stroke="rgba(0,0,0,0.35)" stroke-width="1.5" />
-    <line x1="26" y1="0" x2="26" y2="420" stroke="rgba(255,255,255,0.15)" stroke-width="1" />
-
-    <!-- Embossed Inner Foil Frame -->
-    <rect x="36" y="24" width="244" height="372" rx="8" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1.5" />
-    <rect x="40" y="28" width="236" height="364" rx="6" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="1" />
-
-    <!-- Format Tag -->
-    <rect x="42" y="32" width="48" height="20" rx="4" fill="${extColor}" />
-    <text x="66" y="46" font-family="system-ui, sans-serif" font-size="10" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="1">${ext.toUpperCase()}</text>
-
-    <!-- Category Pill -->
-    <text x="160" y="47" font-family="system-ui, sans-serif" font-size="10" font-weight="700" fill="rgba(255,255,255,0.85)" text-anchor="middle" letter-spacing="2.5">${safeCat}</text>
-
-    <!-- Category Visual Art Motif -->
-    ${artPattern}
-
-    <!-- Book Title (Multi-line support) -->
-    <text x="155" y="195" font-family="'Noto Serif SC', 'Songti SC', 'Georgia', serif" font-size="18" font-weight="bold" fill="#ffffff" text-anchor="middle">
-      ${safeTitle.length > 14 ? safeTitle.substring(0, 13) + '…' : safeTitle}
-    </text>
-    <text x="155" y="222" font-family="'Noto Serif SC', 'Songti SC', 'Georgia', serif" font-size="13" font-weight="500" fill="rgba(255,255,255,0.85)" text-anchor="middle">
-      ${safeTitle.length > 14 ? safeTitle.substring(13, 27) : ''}
-    </text>
-
-    <line x1="85" y1="244" x2="225" y2="244" stroke="url(#gold_${h})" stroke-width="1.5" />
-
-    <!-- Author Name -->
-    <text x="155" y="272" font-family="system-ui, sans-serif" font-size="13" font-weight="600" fill="rgba(255,255,255,0.95)" text-anchor="middle">
-      ${safeAuthor.length > 18 ? safeAuthor.substring(0, 17) + '…' : safeAuthor}
-    </text>
-
-    <!-- Official Seal Badge -->
-    <circle cx="155" cy="326" r="18" fill="url(#gold_${h})" opacity="0.9" />
-    <polygon points="155,314 158,322 166,322 160,327 162,335 155,330 148,335 150,327 144,322 152,322" fill="#ffffff" />
-
-    <!-- Bottom Archive Brand Ribbon & Barcode -->
-    <rect x="52" y="358" width="206" height="24" rx="4" fill="rgba(0,0,0,0.35)" />
-    <text x="155" y="374" font-family="monospace" font-size="9.5" font-weight="bold" fill="#fbbf24" text-anchor="middle" letter-spacing="1">Z-LIBRARY OFFICIAL ARCHIVE</text>
-
-    <!-- ISBN Simulation -->
-    <text x="155" y="394" font-family="monospace" font-size="8" fill="rgba(255,255,255,0.5)" text-anchor="middle">ISBN ${isbn}</text>
-  </svg>`;
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  throw new Error("Redirect count exceeded");
 }
 
-let mockBooks: Book[] = [
-  {
-    id: "zlib-101",
-    title: "三体 (全集)",
-    author: "刘慈欣",
-    year: "2018",
-    publisher: "重庆出版社",
-    extension: "epub",
-    filesize: "12.8 MB",
-    language: "Chinese",
-    rating: 5.0,
-    isbn: "978-7-5366-9290-9",
-    pages: "880 页",
-    quality: "官方插图全集精校版",
-    coverUrl: generateCoverSvg("三体 (全集)", "刘慈欣", "#09122c", "#1e3a8a", "科幻文学", "epub", "978-7-5366-9290-9"),
-    description: "第73届雨果奖最佳长篇小说。文化大革命如火如荼地进行，军方探寻外星文明的红岸基地取得突破性进展，人类文明与四光年外的三体文明的命运由此发生天翻地覆的交织。",
-    downloadsCount: 382400
-  },
-  {
-    id: "zlib-1",
-    title: "Designing Data-Intensive Applications",
-    author: "Martin Kleppmann",
-    year: "2017",
-    publisher: "O'Reilly Media",
-    extension: "pdf",
-    filesize: "35.4 MB",
-    language: "English",
-    rating: 4.9,
-    isbn: "978-1-4493-7332-0",
-    pages: "616 页",
-    quality: "原版高清文字版 (含高精图表)",
-    coverUrl: generateCoverSvg("Designing Data-Intensive Apps", "Martin Kleppmann", "#064e3b", "#047857", "System Architecture", "pdf", "978-1-4493-7332-0"),
-    description: "The Big Ideas Behind Reliable, Scalable, and Maintainable Systems. Essential masterwork for distributed backend systems, storage engines, consensus algorithms, and stream processing.",
-    downloadsCount: 142850
-  },
-  {
-    id: "zlib-2",
-    title: "Clean Code: 代码整洁之道",
-    author: "Robert C. Martin (Uncle Bob)",
-    year: "2010",
-    publisher: "人民邮电出版社",
-    extension: "epub",
-    filesize: "18.2 MB",
-    language: "Chinese",
-    rating: 4.8,
-    isbn: "978-7-115-21687-8",
-    pages: "388 页",
-    quality: "官方中文精排版",
-    coverUrl: generateCoverSvg("代码整洁之道 Clean Code", "Robert C. Martin", "#1e1b4b", "#4338ca", "软件工艺", "epub", "978-7-115-21687-8"),
-    description: "软件工程领域的旷世经典。全面阐述高内聚、低耦合、重构命名、函数法则、错误处理与单元测试的工匠艺术。",
-    downloadsCount: 230910
-  },
-  {
-    id: "zlib-3",
-    title: "Deep Learning (深度学习 花书)",
-    author: "Ian Goodfellow, Yoshua Bengio, Aaron Courville",
-    year: "2017",
-    publisher: "人民邮电出版社",
-    extension: "pdf",
-    filesize: "48.9 MB",
-    language: "Chinese",
-    rating: 4.8,
-    isbn: "978-7-115-46147-6",
-    pages: "522 页",
-    quality: "官方全彩中文文字版",
-    coverUrl: generateCoverSvg("Deep Learning (花书)", "Ian Goodfellow et al.", "#4c0519", "#9f1239", "Artificial Intelligence", "pdf", "978-7-115-46147-6"),
-    description: "AI 领域公认圣经。涵盖应用数学基础、深度前馈网络、卷积神经网络、循环网络、生成对抗模型与前沿理论研究。",
-    downloadsCount: 98400
-  },
-  {
-    id: "zlib-4",
-    title: "深入理解计算机系统 (CSAPP 第3版)",
-    author: "Randal E. Bryant, David R. O'Hallaron",
-    year: "2016",
-    publisher: "机械工业出版社",
-    extension: "pdf",
-    filesize: "68.2 MB",
-    language: "Chinese",
-    rating: 4.9,
-    isbn: "978-7-111-54493-7",
-    pages: "752 页",
-    quality: "高清双色文字版",
-    coverUrl: generateCoverSvg("深入理解计算机系统 CSAPP", "R. E. Bryant", "#1c1917", "#44403c", "计算机底层", "pdf", "978-7-111-54493-7"),
-    description: "卡耐基梅隆大学金牌经典教材。从程序员的独特视角透彻剖析计算机体系结构、x86-64 汇编、存储器层次结构、虚拟内存与并发编程。",
-    downloadsCount: 198200
-  },
-  {
-    id: "zlib-5",
-    title: "The Pragmatic Programmer (20th Anniversary)",
-    author: "David Thomas, Andrew Hunt",
-    year: "2020",
-    publisher: "Addison-Wesley Professional",
-    extension: "epub",
-    filesize: "12.1 MB",
-    language: "English",
-    rating: 4.9,
-    isbn: "978-0-135-95705-9",
-    pages: "352 页",
-    quality: "Retail EPUB Original",
-    coverUrl: generateCoverSvg("The Pragmatic Programmer", "David Thomas, Andrew Hunt", "#312e81", "#6366f1", "Programming", "epub", "978-0-135-95705-9"),
-    description: "Straight from the programming trenches, The Pragmatic Programmer cuts through the increasing specialization of modern software development with actionable wisdom.",
-    downloadsCount: 175600
-  },
-  {
-    id: "zlib-6",
-    title: "JavaScript 高级程序设计（第4版 红宝书）",
-    author: "Matt Frisbie",
-    year: "2020",
-    publisher: "人民邮电出版社",
-    extension: "pdf",
-    filesize: "55.7 MB",
-    language: "Chinese",
-    rating: 4.9,
-    isbn: "978-7-115-54538-0",
-    pages: "886 页",
-    quality: "双色高清文字版",
-    coverUrl: generateCoverSvg("JavaScript高级程序设计", "Matt Frisbie", "#831843", "#be185d", "Web开发", "pdf", "978-7-115-54538-0"),
-    description: "前端开发者必备红宝书，详尽解析 ECMAScript 2020、DOM、BOM、异步 Promise、模块化及现代 Web API。",
-    downloadsCount: 264000
-  },
-  {
-    id: "zlib-7",
-    title: "Rust Programming Language, 2nd Edition",
-    author: "Steve Klabnik, Carol Nichols",
-    year: "2023",
-    publisher: "No Starch Press",
-    extension: "pdf",
-    filesize: "24.6 MB",
-    language: "English",
-    rating: 4.9,
-    isbn: "978-1-718-50310-6",
-    pages: "560 页",
-    quality: "Official Digital Release",
-    coverUrl: generateCoverSvg("Rust Programming 2nd Ed", "Steve Klabnik, Carol Nichols", "#701a75", "#a21caf", "Systems Lang", "pdf", "978-1-718-50310-6"),
-    description: "The official authoritative book on the Rust programming language, empowering you to write faster, memory-safe, and highly concurrent software.",
-    downloadsCount: 84200
-  },
-  {
-    id: "zlib-8",
-    title: "人类简史：从动物到上帝",
-    author: "尤瓦尔·赫拉利 (Yuval Noah Harari)",
-    year: "2017",
-    publisher: "中信出版社",
-    extension: "epub",
-    filesize: "15.3 MB",
-    language: "Chinese",
-    rating: 4.8,
-    isbn: "978-7-508-64735-7",
-    pages: "440 页",
-    quality: "官方插图精校版",
-    coverUrl: generateCoverSvg("人类简史", "尤瓦尔·赫拉利", "#713f12", "#ca8a04", "历史社科", "epub", "978-7-508-64735-7"),
-    description: "全球现象级超级畅销书。从认知革命、农业革命到科学革命，全景式审视智人如何从微不足道的猿类最终统治地球。",
-    downloadsCount: 312000
-  },
-  {
-    id: "zlib-9",
-    title: "算法导论 (Introduction to Algorithms 4th Edition)",
-    author: "Thomas H. Cormen, Charles E. Leiserson",
-    year: "2022",
-    publisher: "MIT Press",
-    extension: "pdf",
-    filesize: "78.5 MB",
-    language: "English",
-    rating: 4.9,
-    isbn: "978-0-262-04630-5",
-    pages: "1312 页",
-    quality: "MIT Press 官方高清版",
-    coverUrl: generateCoverSvg("Introduction to Algorithms", "Thomas H. Cormen", "#155e75", "#0e7490", "算法理论", "pdf", "978-0-262-04630-5"),
-    description: "The definitive reference for algorithms worldwide. Covers divide-and-conquer, dynamic programming, greedy algorithms, graph theories, and NP-completeness.",
-    downloadsCount: 189400
-  },
-  {
-    id: "zlib-10",
-    title: "百年孤独 (One Hundred Years of Solitude)",
-    author: "加西亚·马尔克斯 (Gabriel García Márquez)",
-    year: "2017",
-    publisher: "南海出版公司",
-    extension: "epub",
-    filesize: "8.6 MB",
-    language: "Chinese",
-    rating: 4.9,
-    isbn: "978-7-544-25399-4",
-    pages: "360 页",
-    quality: "范晔译本正版授权",
-    coverUrl: generateCoverSvg("百年孤独", "加西亚·马尔克斯", "#14532d", "#166534", "世界名著", "epub", "978-7-544-25399-4"),
-    description: "魔幻现实主义文学巅峰之作。布恩迪亚家族七代人在虚构马孔多小镇兴衰演变、孤独循环的世纪史诗。",
-    downloadsCount: 340100
-  },
-  {
-    id: "zlib-11",
-    title: "经济学原理 (微观+宏观分册 第8版)",
-    author: "N. 格里高利·曼昆 (N. Gregory Mankiw)",
-    year: "2020",
-    publisher: "北京大学出版社",
-    extension: "pdf",
-    filesize: "84.2 MB",
-    language: "Chinese",
-    rating: 4.8,
-    isbn: "978-7-301-31102-8",
-    pages: "768 页",
-    quality: "北大出版社双色高清文字版",
-    coverUrl: generateCoverSvg("经济学原理 曼昆第8版", "N. 格里高利·曼昆", "#78350f", "#b45309", "经济金融", "pdf", "978-7-301-31102-8"),
-    description: "风靡全球的经典经济学入门读物，清晰阐释供给需求、弹性分析、市场效率、货币银行与宏观经济波动。",
-    downloadsCount: 215000
-  },
-  {
-    id: "zlib-12",
-    title: "Kubernetes 权威指南：从 Docker 到 Kubernetes 实践全接触（第5版）",
-    author: "龚正, 吴治辉, 崔秀龙",
-    year: "2021",
-    publisher: "电子工业出版社",
-    extension: "pdf",
-    filesize: "92.4 MB",
-    language: "Chinese",
-    rating: 4.8,
-    isbn: "978-7-121-40905-9",
-    pages: "960 页",
-    quality: "高清双色完整书签版",
-    coverUrl: generateCoverSvg("Kubernetes 权威指南", "龚正, 吴治辉", "#0f172a", "#0284c7", "云计算架构", "pdf", "978-7-121-40905-9"),
-    description: "云原生时代权威圣经。深入剖析 Pod 调度、网络插件、Service 网格、持久化存储与企业级微服务集群运维。",
-    downloadsCount: 158900
-  },
-  {
-    id: "zlib-13",
-    title: "Refactoring: Improving the Design of Existing Code (2nd Edition)",
-    author: "Martin Fowler",
-    year: "2018",
-    publisher: "Addison-Wesley",
-    extension: "epub",
-    filesize: "14.5 MB",
-    language: "English",
-    rating: 4.9,
-    isbn: "978-0-134-75759-9",
-    pages: "448 页",
-    quality: "Official Digital Edition",
-    coverUrl: generateCoverSvg("Refactoring 2nd Edition", "Martin Fowler", "#1e293b", "#4f46e5", "Software Design", "epub", "978-0-134-75759-9"),
-    description: "Fully revised and updated with JavaScript examples, demonstrating how to cleanly restructure code without changing external behavior.",
-    downloadsCount: 162300
-  },
-  {
-    id: "zlib-14",
-    title: "思考，快与慢 (Thinking, Fast and Slow)",
-    author: "丹尼尔·卡尼曼 (Daniel Kahneman)",
-    year: "2012",
-    publisher: "中信出版社",
-    extension: "epub",
-    filesize: "9.8 MB",
-    language: "Chinese",
-    rating: 4.9,
-    isbn: "978-7-508-63355-8",
-    pages: "424 页",
-    quality: "精校完整插图版",
-    coverUrl: generateCoverSvg("思考，快与慢", "丹尼尔·卡尼曼", "#451a03", "#d97706", "心理与行为经济学", "epub", "978-7-508-63355-8"),
-    description: "诺贝尔经济学奖得主卡尼曼经典代表作，系统揭示大脑系统1（直觉）与系统2（理性）在决策中的认知偏误。",
-    downloadsCount: 289000
-  },
-  {
-    id: "zlib-15",
-    title: "高性能 MySQL (第4版)",
-    author: "Silvia Botros, Jeremy Tinley",
-    year: "2022",
-    publisher: "电子工业出版社",
-    extension: "pdf",
-    filesize: "46.8 MB",
-    language: "Chinese",
-    rating: 4.8,
-    isbn: "978-7-121-43456-3",
-    pages: "412 页",
-    quality: "官方中文高清版",
-    coverUrl: generateCoverSvg("高性能 MySQL 第4版", "Silvia Botros", "#111827", "#059669", "数据库架构", "pdf", "978-7-121-43456-3"),
-    description: "数据库领域不可替代的经典指南，深度解读 InnoDB 存储引擎、B+树索引优化、主从高可用与海量分库分表策略。",
-    downloadsCount: 194500
-  },
-  {
-    id: "zlib-16",
-    title: "Don't Make Me Think, Revisited",
-    author: "Steve Krug",
-    year: "2014",
-    publisher: "New Riders",
-    extension: "pdf",
-    filesize: "19.2 MB",
-    language: "English",
-    rating: 4.8,
-    isbn: "978-0-321-96551-6",
-    pages: "216 页",
-    quality: "Full-Color UX Classic",
-    coverUrl: generateCoverSvg("Don't Make Me Think", "Steve Krug", "#3b0764", "#9333ea", "UX Design", "pdf", "978-0-321-96551-6"),
-    description: "A common sense approach to web and mobile usability. Essential handbook for product designers and frontend architects.",
-    downloadsCount: 137200
-  }
-];
+function isCfChallenge(html: string): boolean {
+  const lower = html.toLowerCase();
+  return (
+    lower.includes("just a moment...") ||
+    lower.includes("cf-browser-verification") ||
+    lower.includes("challenge-platform") ||
+    lower.includes("attention required! | cloudflare") ||
+    lower.includes("enable javascript and cookies to continue") ||
+    lower.includes("verifying your browser | diamwall") ||
+    lower.includes("__diamwall")
+  );
+}
 
-// Active mirrors list
+function parseZlibMirrorHtmlServer(html: string, mirrorBase: string): Book[] {
+  const books: Book[] = [];
+  const seenIds = new Set<string>();
+
+  // Strategy 1: Modern <z-bookcard ...>...</z-bookcard>
+  const cardRe = /<z-bookcard\b([^>]*)>([\s\S]*?)<\/z-bookcard>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = cardRe.exec(html)) !== null) {
+    const attrs = match[1] || "";
+    const inner = match[2] || "";
+
+    const id = extractAttr(attrs, "id") || `zlib-${books.length + 1}`;
+    if (seenIds.has(id)) continue;
+
+    const titleSlot = inner.match(/<[^>]*slot=["']title["'][^>]*>([\s\S]*?)<\/[^>]+>/i);
+    const authorSlot = inner.match(/<[^>]*slot=["']author["'][^>]*>([\s\S]*?)<\/[^>]+>/i);
+    const noteSlot = inner.match(/<[^>]*slot=["']note["'][^>]*>([\s\S]*?)<\/[^>]+>/i);
+
+    const title = titleSlot ? stripTags(titleSlot[1]) : extractAttr(attrs, "title");
+    if (!title) continue;
+
+    seenIds.add(id);
+    const author = (authorSlot ? stripTags(authorSlot[1]) : extractAttr(attrs, "author")) || "未知作者";
+    const href = extractAttr(attrs, "href");
+    const dlAttr = extractAttr(attrs, "download");
+
+    const imgMatch = inner.match(/<img\b([^>]*)>/i);
+    const imgAttrs = imgMatch ? imgMatch[1] : "";
+    const rawCover =
+      extractAttr(imgAttrs, "data-src") ||
+      extractAttr(imgAttrs, "src") ||
+      extractAttr(attrs, "cover");
+
+    const ext = (extractAttr(attrs, "extension") || "pdf").replace(/^\./, "").toLowerCase();
+    const filesize = extractAttr(attrs, "filesize") || "未知大小";
+    const year = extractAttr(attrs, "year") || "-";
+    const publisher = extractAttr(attrs, "publisher") || "Z-Library";
+    const language = extractAttr(attrs, "language") || "未知";
+    const ratingNum = parseFloat(extractAttr(attrs, "rating") || "0");
+    const quality = extractAttr(attrs, "quality");
+    const isbn = extractAttr(attrs, "isbn");
+    const pages = extractAttr(attrs, "pages");
+
+    books.push({
+      id,
+      title,
+      author,
+      year,
+      publisher,
+      extension: ext || "pdf",
+      filesize,
+      language,
+      rating: Number.isFinite(ratingNum) && ratingNum > 0 ? ratingNum : 0,
+      coverUrl: resolveUrl(rawCover, mirrorBase),
+      description: noteSlot ? stripTags(noteSlot[1]) : "",
+      downloadsCount: 0,
+      isbn: isbn || undefined,
+      pages: pages || undefined,
+      quality: quality || undefined,
+      detailUrl: href ? resolveUrl(href, mirrorBase) : mirrorBase,
+      downloadUrl: dlAttr ? resolveUrl(dlAttr, mirrorBase) : undefined,
+      sourceMirror: mirrorBase
+    });
+  }
+
+  if (books.length > 0) return books;
+
+  // Strategy 2: Classic resItemBox blocks (supports z-lib.id & classic mirrors)
+  const boxRe = /<div\b([^>]*class=["'][^"']*resItemBox[^"']*["'][^>]*)>([\s\S]*?)(?=<div\b[^>]*class=["'][^"']*resItemBox|$)/gi;
+  while ((match = boxRe.exec(html)) !== null) {
+    const boxAttrs = match[1] || "";
+    const block = match[2] || "";
+    const titleMatch = block.match(/<h3[^>]*>[\s\S]*?<a\b([^>]*)>([\s\S]*?)<\/a>/i) ||
+      block.match(/<a\b([^>]*href=["']\/book\/[^"']*["'][^>]*)>([\s\S]*?)<\/a>/i);
+    if (!titleMatch) continue;
+
+    const title = stripTags(titleMatch[2]);
+    if (!title) continue;
+    const href = extractAttr(titleMatch[1], "href");
+    const bookIdAttr = extractAttr(boxAttrs, "data-book_id");
+    const isbnAttr = extractAttr(boxAttrs, "data-isbn");
+    const idMatch = href.match(/\/book\/([^/?#]+)/);
+    const id = bookIdAttr || (idMatch ? idMatch[1] : `zlib-${books.length + 1}`);
+    if (seenIds.has(id)) continue;
+    seenIds.add(id);
+
+    const authorsBlockMatch = block.match(/<div[^>]*class=["'][^"']*authors[^"']*["'][^>]*>([\s\S]*?)<\/div>/i);
+    const authorSource = authorsBlockMatch ? authorsBlockMatch[1] : block;
+    const authorMatches = [...authorSource.matchAll(/<a[^>]*>([\s\S]*?)<\/a>/gi)];
+    const author = authorMatches.map((m) => stripTags(m[1])).filter(Boolean).join(", ") || "未知作者";
+
+    const imgMatch = block.match(/<img\b([^>]*)>/i);
+    const rawCover = imgMatch
+      ? extractAttr(imgMatch[1], "data-src") || extractAttr(imgMatch[1], "src")
+      : "";
+
+    const yearMatch = block.match(/property_year[\s\S]*?property_value[^>]*>([\s\S]*?)<\/div>/i);
+    const langMatch = block.match(/property_language[\s\S]*?property_value[^>]*>([\s\S]*?)<\/div>/i);
+    const pubMatch = block.match(/property_publisher[\s\S]*?property_value[^>]*>([\s\S]*?)<\/div>/i) ||
+      block.match(/<a[^>]*title=["'][^"']*Publisher[^"']*["'][^>]*>([\s\S]*?)<\/a>/i);
+    const fileMatch = block.match(/property__file[\s\S]*?property_value[^>]*>([\s\S]*?)<\/div>/i);
+    const [rawExt, rawSize] = (fileMatch ? stripTags(fileMatch[1]) : "").split(",").map((s) => s.trim());
+
+    books.push({
+      id,
+      title,
+      author,
+      year: yearMatch ? stripTags(yearMatch[1]) : "-",
+      publisher: pubMatch ? stripTags(pubMatch[1]) : "Z-Library",
+      extension: (rawExt || "pdf").toLowerCase(),
+      filesize: rawSize || "见详情页",
+      language: langMatch ? stripTags(langMatch[1]) : "未知",
+      rating: 0,
+      coverUrl: resolveUrl(rawCover, mirrorBase),
+      description: "",
+      downloadsCount: 0,
+      isbn: isbnAttr || undefined,
+      detailUrl: href ? resolveUrl(href, mirrorBase) : mirrorBase,
+      sourceMirror: mirrorBase
+    });
+  }
+
+  return books;
+}
+
+// Active mirrors list (verified live mirrors prioritized first)
 let mirrors = [
-  { id: "m-1", url: "https://singlelogin.re", status: "online", latency: "142ms", active: true },
-  { id: "m-2", url: "https://z-lib.is", status: "online", latency: "198ms", active: false },
-  { id: "m-3", url: "https://z-lib.fm", status: "online", latency: "235ms", active: false },
-  { id: "m-4", url: "https://1lib.sk", status: "unstable", latency: "650ms", active: false }
+  { id: "m-1", url: "https://z-lib.id", status: "online", latency: "120ms", active: true },
+  { id: "m-2", url: "https://z-lib.cc", status: "online", latency: "160ms", active: false },
+  { id: "m-3", url: "https://z-library.sk", status: "unstable", latency: "待测速", active: false },
+  { id: "m-4", url: "https://1lib.sk", status: "unstable", latency: "待测速", active: false }
 ];
 
-// API: Search books (Matching Official Z-Library Logic)
-app.get("/api/zlib/search", (req, res) => {
-  const query = (req.query.q as string || "").trim().toLowerCase();
-  const field = (req.query.field as string || "all").toLowerCase();
-  const lang = req.query.lang as string || "all";
-  const ext = req.query.ext as string || "all";
-  const yearFrom = parseInt(req.query.yearFrom as string || "0");
-  const yearTo = parseInt(req.query.yearTo as string || "9999");
-  const exact = req.query.exact === "true";
+// API: Real Z-Library Mirror Search (supports both /s?q=... and /s/... with cookie-jar & error diagnosis)
+function buildServerSearchUrls(
+  mirrorBase: string,
+  searchTerm: string,
+  opts: { lang: string; ext: string; exact: boolean; yearFrom: string; yearTo: string; page: number }
+): string[] {
+  const applyParams = (u: URL) => {
+    if (opts.lang !== "all") u.searchParams.append("languages[]", opts.lang.toLowerCase());
+    if (opts.ext !== "all") u.searchParams.append("extensions[]", opts.ext.toUpperCase());
+    if (opts.exact) u.searchParams.set("e", "1");
+    if (opts.yearFrom) u.searchParams.set("yearFrom", opts.yearFrom);
+    if (opts.yearTo) u.searchParams.set("yearTo", opts.yearTo);
+    if (opts.page > 1) u.searchParams.set("page", String(opts.page));
+    return u.toString();
+  };
 
-  let results = mockBooks.filter(b => {
-    let matchQuery = true;
-    if (query) {
-      if (exact) {
-        if (field === "title") matchQuery = b.title.toLowerCase() === query;
-        else if (field === "author") matchQuery = b.author.toLowerCase() === query;
-        else if (field === "isbn") matchQuery = (b.isbn || "").toLowerCase().replace(/-/g, "") === query.replace(/-/g, "");
-        else if (field === "publisher") matchQuery = b.publisher.toLowerCase() === query;
-        else matchQuery = b.title.toLowerCase() === query || b.author.toLowerCase() === query;
+  if (!searchTerm) return [applyParams(new URL(`${mirrorBase}/`))];
+
+  const queryStyle = new URL(`${mirrorBase}/s`);
+  queryStyle.searchParams.set("q", searchTerm);
+  const pathStyle = new URL(`${mirrorBase}/s/${encodeURIComponent(searchTerm)}`);
+
+  const preferQuery = /z-lib\.id|z-lib\.cc/i.test(mirrorBase);
+  return preferQuery
+    ? [applyParams(queryStyle), applyParams(pathStyle)]
+    : [applyParams(pathStyle), applyParams(queryStyle)];
+}
+
+app.get("/api/zlib/search", async (req, res) => {
+  const query = ((req.query.q as string) || "").trim();
+  const field = ((req.query.field as string) || "all").toLowerCase();
+  const lang = (req.query.lang as string) || "all";
+  const ext = (req.query.ext as string) || "all";
+  const yearFrom = (req.query.yearFrom as string) || "";
+  const yearTo = (req.query.yearTo as string) || "";
+  const exact = req.query.exact === "true";
+  const page = parseInt((req.query.page as string) || "1", 10) || 1;
+  const mirrorBase = normalizeMirrorUrl((req.query.mirrorUrl as string) || mirrors.find((m) => m.active)?.url);
+  const cookieHeader = ((req.headers["x-zlib-cookie"] as string) || "").trim();
+
+  let searchTerm = query;
+  if (query && field === "author") searchTerm = `author:${query}`;
+  else if (query && field === "isbn") searchTerm = query.replace(/\s+/g, "");
+  else if (query && field === "publisher") searchTerm = `publisher:${query}`;
+
+  const candidateUrls = buildServerSearchUrls(mirrorBase, searchTerm, {
+    lang,
+    ext,
+    exact,
+    yearFrom,
+    yearTo,
+    page
+  });
+  let mirrorSearchUrl = candidateUrls[0];
+
+  try {
+    let html = "";
+    let upstreamStatus = 0;
+    let ok = false;
+
+    for (const url of candidateUrls) {
+      mirrorSearchUrl = url;
+      const { res: upstream } = await fetchWithCookieJar(url, {
+        headers: { Referer: `${mirrorBase}/` },
+        cookie: cookieHeader
+      });
+      upstreamStatus = upstream.status;
+      ok = upstream.ok;
+      html = await upstream.text();
+      if (upstreamStatus !== 404) break;
+    }
+
+    if (isCfChallenge(html) || upstreamStatus === 403 || upstreamStatus === 503 || upstreamStatus === 513) {
+      return res.json({
+        success: false,
+        books: [],
+        total: 0,
+        mirrorUrl: mirrorBase,
+        mirrorSearchUrl,
+        blockedByCloudflare: true,
+        error: `镜像节点 (${mirrorBase}) 触发了人机拦截 (HTTP ${upstreamStatus})。建议一键切换至可用镜像 (https://z-lib.id)，或点击下方按钮在浏览器完成验证。`
+      });
+    }
+
+    if (!ok) {
+      return res.json({
+        success: false,
+        books: [],
+        total: 0,
+        mirrorUrl: mirrorBase,
+        mirrorSearchUrl,
+        error: `镜像节点 (${mirrorBase}) 返回 HTTP ${upstreamStatus}，请切换其他可用镜像节点（如 https://z-lib.id）重试。`
+      });
+    }
+
+    const parsedBooks = parseZlibMirrorHtmlServer(html, mirrorBase);
+    return res.json({
+      success: true,
+      books: parsedBooks,
+      total: parsedBooks.length,
+      mirrorUrl: mirrorBase,
+      mirrorSearchUrl
+    });
+  } catch (err: any) {
+    return res.json({
+      success: false,
+      books: [],
+      total: 0,
+      mirrorUrl: mirrorBase,
+      mirrorSearchUrl,
+      error: formatMirrorNetworkError(err, mirrorBase)
+    });
+  }
+});
+
+// API: Real Mirror File Download / Export Proxy
+app.get("/api/zlib/download", async (req, res) => {
+  const rawTarget = ((req.query.url as string) || "").trim();
+  const mirrorBase = normalizeMirrorUrl((req.query.mirrorUrl as string) || "https://z-lib.id");
+  const cookieRaw = ((req.query.cookie as string) || "").trim();
+  const filename = ((req.query.filename as string) || "zlib-book.pdf").replace(/[\\/:*?"<>|]/g, "_");
+
+  if (!rawTarget) {
+    return res.status(400).json({ success: false, error: "缺少书籍下载链接" });
+  }
+
+  const targetUrl = resolveUrl(rawTarget, mirrorBase);
+
+  try {
+    let downloadTarget = targetUrl;
+    if (!targetUrl.includes("/dl/")) {
+      const { res: detailRes } = await fetchWithCookieJar(targetUrl, {
+        headers: { Referer: `${mirrorBase}/` },
+        cookie: cookieRaw
+      });
+      const detailHtml = await detailRes.text();
+      if (isCfChallenge(detailHtml) || detailRes.status === 403 || detailRes.status === 513) {
+        return res.status(403).json({
+          success: false,
+          requiresBrowser: true,
+          targetUrl,
+          error: `镜像站 (${mirrorBase}) 需要人机验证，请点击跳转在浏览器中下载。`
+        });
+      }
+      const dlMatch = detailHtml.match(/href=["']([^"']*\/dl\/[^"']+)["']/i) ||
+        detailHtml.match(/href=["']([^"']*download[^"']*\.(?:pdf|epub|mobi|azw3|zip)[^"']*)["']/i);
+      if (dlMatch) {
+        downloadTarget = resolveUrl(dlMatch[1], mirrorBase);
       } else {
-        if (field === "title") matchQuery = b.title.toLowerCase().includes(query);
-        else if (field === "author") matchQuery = b.author.toLowerCase().includes(query);
-        else if (field === "isbn") matchQuery = (b.isbn || "").toLowerCase().includes(query) || (b.isbn || "").replace(/-/g, "").includes(query.replace(/-/g, ""));
-        else if (field === "publisher") matchQuery = b.publisher.toLowerCase().includes(query);
-        else matchQuery = b.title.toLowerCase().includes(query) || b.author.toLowerCase().includes(query) || b.publisher.toLowerCase().includes(query) || (b.isbn || "").includes(query) || b.description.toLowerCase().includes(query);
+        const needsLogin = /href=["'][^"']*\/login["'][^>]*>[\s\S]{0,80}Login/i.test(detailHtml);
+        return res.status(400).json({
+          success: false,
+          requiresBrowser: true,
+          targetUrl,
+          error: needsLogin
+            ? `镜像站 (${mirrorBase}) 要求登录账号后才提供下载直链，将在浏览器打开原书页供登录下载。`
+            : `未在镜像详情页提取到直链（可能需先登录或今日配额已用完），将在浏览器为您打开原书页。`
+        });
       }
     }
 
-    const matchLang = lang === "all" || b.language.toLowerCase() === lang.toLowerCase();
-    const matchExt = ext === "all" || b.extension.toLowerCase() === ext.toLowerCase();
-    const bookYear = parseInt(b.year || "0");
-    const matchYear = (yearFrom === 0 || bookYear >= yearFrom) && (yearTo === 9999 || bookYear <= yearTo);
+    const { res: fileRes } = await fetchWithCookieJar(downloadTarget, {
+      headers: { Referer: targetUrl },
+      cookie: cookieRaw,
+      timeoutMs: 30000
+    });
+    const contentType = fileRes.headers.get("content-type") || "application/octet-stream";
+    if (!fileRes.ok || contentType.includes("text/html")) {
+      return res.status(403).json({
+        success: false,
+        requiresBrowser: true,
+        targetUrl: downloadTarget,
+        error: `镜像站未直接下发文件流（可能需账号权限确认或人机验证），请在浏览器中打开继续下载。`
+      });
+    }
 
-    return matchQuery && matchLang && matchExt && matchYear;
-  });
+    const arrayBuf = await fileRes.arrayBuffer();
+    const fileBuf = Buffer.from(arrayBuf);
+    let savedPath = "";
+    try {
+      const targetDir = getLocalDownloadsDir();
+      savedPath = path.join(targetDir, filename);
+      fs.writeFileSync(savedPath, fileBuf);
+    } catch {
+      savedPath = "";
+    }
 
-  // If query is specific and no exact match in preloaded list, dynamically generate official Z-Library search results!
-  if (results.length === 0 && query) {
-    const capitalized = query.charAt(0).toUpperCase() + query.slice(1);
-    const chosenExt = ext === 'all' ? 'pdf' : ext;
-    const dynamicBooks: Book[] = [
-      {
-        id: `zlib-dyn-${Date.now()}-1`,
-        title: `${capitalized}: Principles, Theory and Practice`,
-        author: `Prof. Alex ${capitalized}son`,
-        year: "2023",
-        publisher: "Springer Nature",
-        extension: chosenExt,
-        filesize: "28.4 MB",
-        language: lang === 'Chinese' ? 'Chinese' : 'English',
-        rating: 4.8,
-        isbn: "978-3-030-84512-4",
-        pages: "498 页",
-        quality: "Springer 官方高清文字版",
-        coverUrl: generateCoverSvg(`${capitalized}: Theory & Practice`, `Prof. Alex ${capitalized}son`, "#1e293b", "#2563eb", query, chosenExt, "978-3-030-84512-4"),
-        description: `Comprehensive academic monograph covering ${query} foundations, real-world case studies, architecture patterns, and future developments.`,
-        downloadsCount: 42100
-      },
-      {
-        id: `zlib-dyn-${Date.now()}-2`,
-        title: `实战 ${query}：从入门到架构进阶指南`,
-        author: `技术专家委员会`,
-        year: "2024",
-        publisher: "电子工业出版社",
-        extension: ext === 'all' ? 'epub' : ext,
-        filesize: "16.8 MB",
-        language: "Chinese",
-        rating: 4.9,
-        isbn: "978-7-121-43210-9",
-        pages: "380 页",
-        quality: "官方全彩精排 EPUB",
-        coverUrl: generateCoverSvg(`实战 ${query}`, "技术专家委员会", "#311042", "#7c3aed", query, ext === 'all' ? 'epub' : ext, "978-7-121-43210-9"),
-        description: `针对 ${query} 的深度实战指南，涵盖从零起步、核心机制剖析到生产环境高可用落地的完整知识树。`,
-        downloadsCount: 68500
-      },
-      {
-        id: `zlib-dyn-${Date.now()}-3`,
-        title: `${query} 核心原理与案例全解 (第2版)`,
-        author: `李明华 著`,
-        year: "2022",
-        publisher: "机械工业出版社",
-        extension: "pdf",
-        filesize: "42.1 MB",
-        language: "Chinese",
-        rating: 4.8,
-        isbn: "978-7-111-68932-1",
-        pages: "520 页",
-        quality: "高清文字双色版",
-        coverUrl: generateCoverSvg(`${query} 核心原理与案例全解`, "李明华 著", "#0f172a", "#0d9488", query, "pdf", "978-7-111-68932-1"),
-        description: `汇集一线研发与科研团队多年的深厚沉淀，全面剖析 ${query} 的底层本质与高频实操疑难。`,
-        downloadsCount: 31800
-      }
-    ];
-    results = dynamicBooks;
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
+    if (savedPath) {
+      res.setHeader("X-Saved-Path", encodeURIComponent(savedPath));
+    }
+    return res.send(fileBuf);
+  } catch (err: any) {
+    return res.status(502).json({
+      success: false,
+      requiresBrowser: true,
+      targetUrl,
+      error: `下载导出失败：${formatMirrorNetworkError(err, mirrorBase)}`
+    });
+  }
+});
+
+// API: Open or list local ZLibraryDownloads folder
+function listLocalDownloadFiles(dir: string) {
+  try {
+    return fs
+      .readdirSync(dir)
+      .map((name) => {
+        const full = path.join(dir, name);
+        const stat = fs.statSync(full);
+        if (!stat.isFile()) return null;
+        return {
+          name,
+          size: stat.size,
+          path: full,
+          mtime: stat.mtime.toISOString()
+        };
+      })
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+app.post("/api/system/open-folder", (_req, res) => {
+  const dir = getLocalDownloadsDir();
+  const files = listLocalDownloadFiles(dir);
+  const hasDesktopGui =
+    process.platform === "win32" ||
+    process.platform === "darwin" ||
+    Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
+
+  if (!hasDesktopGui) {
+    return res.json({
+      success: true,
+      opened: false,
+      headless: true,
+      path: dir,
+      files
+    });
   }
 
-  res.json({ success: true, books: results, total: results.length });
+  try {
+    const cmd =
+      process.platform === "win32"
+        ? "explorer"
+        : process.platform === "darwin"
+        ? "open"
+        : "xdg-open";
+    const child = spawn(cmd, [dir], { detached: true, stdio: "ignore" });
+    child.unref();
+    return res.json({
+      success: true,
+      opened: true,
+      headless: false,
+      path: dir,
+      files
+    });
+  } catch (err: any) {
+    return res.json({
+      success: true,
+      opened: false,
+      headless: true,
+      path: dir,
+      files,
+      error: err?.message
+    });
+  }
+});
+
+app.get("/api/system/local-files", (_req, res) => {
+  const dir = getLocalDownloadsDir();
+  res.json({ success: true, path: dir, files: listLocalDownloadFiles(dir) });
+});
+
+app.get("/api/system/local-file", (req, res) => {
+  const rawName = String(req.query.name || "");
+  const safeName = path.basename(rawName);
+  if (!safeName) {
+    return res.status(400).json({ success: false, error: "缺少文件名" });
+  }
+  const dir = getLocalDownloadsDir();
+  const fullPath = path.resolve(dir, safeName);
+  if (!fullPath.startsWith(dir) || !fs.existsSync(fullPath)) {
+    return res.status(404).json({ success: false, error: "本地书库文件不存在" });
+  }
+  const ext = path.extname(safeName).toLowerCase();
+  const mime =
+    ext === ".pdf"
+      ? "application/pdf"
+      : ext === ".epub"
+      ? "application/epub+zip"
+      : ext === ".txt"
+      ? "text/plain; charset=utf-8"
+      : ext === ".html" || ext === ".htm"
+      ? "text/html; charset=utf-8"
+      : "application/octet-stream";
+  res.setHeader("Content-Type", mime);
+  res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(safeName)}`);
+  return res.sendFile(fullPath);
 });
 
 // API: Get mirrors
@@ -583,17 +678,53 @@ app.get("/api/zlib/mirrors", (req, res) => {
   res.json({ success: true, mirrors });
 });
 
-// API: Test mirrors
-app.post("/api/zlib/mirrors/test", (req, res) => {
-  mirrors = mirrors.map(m => {
-    const latencyVal = Math.floor(80 + Math.random() * 300);
-    return {
-      ...m,
-      status: latencyVal < 400 ? "online" : "unstable",
-      latency: `${latencyVal}ms`
-    };
-  });
-  res.json({ success: true, mirrors });
+// API: Real Latency Check for Mirrors (detects SSL errors, parked redirects, and DiamWall/CF)
+app.post("/api/zlib/mirrors/test", async (req, res) => {
+  const inputMirrors = Array.isArray(req.body?.mirrors) && req.body.mirrors.length > 0 ? req.body.mirrors : mirrors;
+
+  const tested = await Promise.all(
+    inputMirrors.map(async (m: any) => {
+      const target = normalizeMirrorUrl(m.url);
+      const t0 = Date.now();
+      try {
+        const { res: upstream, finalUrl } = await fetchWithCookieJar(target, { timeoutMs: 5500 });
+        const ms = Math.max(20, Date.now() - t0);
+        const origHost = new URL(target).hostname.replace(/^www\./, "");
+        const finalHost = new URL(finalUrl).hostname.replace(/^www\./, "");
+        // Detect parked domain redirects (e.g. z-lib.is -> ad domain)
+        if (!finalHost.includes(origHost) && !origHost.includes(finalHost)) {
+          return {
+            ...m,
+            status: "offline",
+            latency: "域名已跳转失效"
+          };
+        }
+        if (upstream.status === 403 || upstream.status === 503 || upstream.status === 513) {
+          return {
+            ...m,
+            status: "unstable",
+            latency: `${ms}ms (需验证)`
+          };
+        }
+        const ok = upstream.status >= 200 && upstream.status < 400;
+        return {
+          ...m,
+          status: ok ? (ms < 1500 ? "online" : "unstable") : "offline",
+          latency: ok ? `${ms}ms` : `HTTP ${upstream.status}`
+        };
+      } catch (err: any) {
+        const code = err?.cause?.code || err?.code || "";
+        return {
+          ...m,
+          status: "offline",
+          latency: code === "CERT_HAS_EXPIRED" ? "证书过期" : code === "ENOTFOUND" ? "域名失效" : "超时/不可达"
+        };
+      }
+    })
+  );
+
+  mirrors = tested;
+  res.json({ success: true, mirrors: tested });
 });
 
 // API: Multi-Provider AI Book Summary & Recommendation (Google Gemini / OpenAI / DeepSeek / OpenAI-Compatible)
@@ -805,7 +936,7 @@ app.get("/api/tauri/config-files", (req, res) => {
       "beforeBuildCommand": "",
       "devPath": "http://localhost:3000",
       "distDir": "../dist",
-      "withGlobalTauri": false
+      "withGlobalTauri": true
     },
     "package": {
       "productName": "zlib-downloader",
@@ -877,23 +1008,40 @@ custom-protocol = ["tauri/custom-protocol"]
 }
 `;
 
-  const mainRs = `// Prevents additional console window on Windows in release, DO NOT REMOVE!!
+  const mainRs = fs.existsSync(path.resolve(process.cwd(), "src-tauri/src/main.rs"))
+    ? fs.readFileSync(path.resolve(process.cwd(), "src-tauri/src/main.rs"), "utf8")
+    : `// Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
   tauri::Builder::default()
-    .invoke_handler(tauri::generate_handler![])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }
 `;
 
   const buildScript = `@echo off
-echo Building Z-Library Downloader Tauri App (.exe portable & installer)...
-call npm install --legacy-peer-deps
-call npm run build
-call npx --yes @tauri-apps/cli@1.5 build
-echo Build completed! Check src-tauri/target/release/bundle/ for .exe installer and portable files.
+chcp 65001 >nul
+echo ========================================================
+echo   Z-Library 下载器 - Tauri Windows .EXE 一键构建脚本
+echo ========================================================
+where node >nul 2>nul || (echo [错误] 未检测到 Node.js，请先安装 Node.js 20/22+ & pause & exit /b 1)
+where cargo >nul 2>nul || (echo [错误] 未检测到 Rust Cargo，请先安装 Rustup: https://rustup.rs/ & pause & exit /b 1)
+
+echo [1/3] 安装 npm 依赖...
+call npm install --legacy-peer-deps || (echo [错误] npm 依赖安装失败 & pause & exit /b 1)
+
+echo [2/3] 编译 Vite 前端生产资源 (dist/)...
+call npm run build || (echo [错误] 前端编译失败 & pause & exit /b 1)
+
+echo [3/3] 编译 Tauri v1.5 原生 Windows .EXE 与 NSIS 安装包...
+call npx --yes @tauri-apps/cli@1.5 build || (echo [错误] Tauri Rust 构建失败 & pause & exit /b 1)
+
+echo ========================================================
+echo [打包完成] 请在以下路径获取成品:
+echo   便携版 EXE: src-tauri\\target\\release\\zlib-downloader.exe
+echo   安装版 EXE: src-tauri\\target\\release\\bundle\\nsis\\
+echo ========================================================
 pause
 `;
 
@@ -912,19 +1060,32 @@ pause
   };
 
   const buildApkBat = `@echo off
+chcp 65001 >nul
 echo ====================================================
 echo   Z-Library 下载器 Android APK 一键打包脚本 (Windows)
 echo ====================================================
-call npm install --legacy-peer-deps
-call npm run build
+where node >nul 2>nul || (echo [错误] 未检测到 Node.js 20/22+ & pause & exit /b 1)
+where java >nul 2>nul || (echo [错误] 未检测到 JDK 17，请先安装 Temurin/Adoptium JDK 17 & pause & exit /b 1)
+
+echo [1/4] 安装项目依赖并构建前端相对路径产物...
+call npm install --legacy-peer-deps || (pause & exit /b 1)
+call npm run build || (pause & exit /b 1)
+
 if not exist android (
-  echo 初始化 Capacitor Android 工程...
-  call npm install --legacy-peer-deps @capacitor/core@^6.2.0 @capacitor/cli@^6.2.0 @capacitor/android@^6.2.0
-  call npx cap add android
+  echo [2/4] 初始化 Capacitor v6 Android 原生工程...
+  call npm install --legacy-peer-deps @capacitor/core@^6.2.0 @capacitor/cli@^6.2.0 @capacitor/android@^6.2.0 || (pause & exit /b 1)
+  call npx cap add android || (pause & exit /b 1)
+) else (
+  echo [2/4] 检测到已有 android 工程，跳过初始化...
 )
-call npx cap sync android
+
+echo [3/4] 同步 dist/ 至 Android WebView 资源目录...
+call npx cap sync android || (pause & exit /b 1)
+
+echo [4/4] 调用 Gradle 编译 Android APK...
 cd android
-call gradlew.bat assembleDebug
+call gradlew.bat assembleDebug || (cd .. & pause & exit /b 1)
+cd ..
 echo.
 echo [打包成功] APK 输出路径: android\\app\\build\\outputs\\apk\\debug\\app-debug.apk
 pause
@@ -932,23 +1093,29 @@ pause
 
   const buildApkSh = `#!/usr/bin/env bash
 set -e
-echo ">>> 1. 构建前端相对路径静态包..."
+echo ">>> [1/4] 安装依赖并构建前端相对路径静态包..."
+command -v node >/dev/null 2>&1 || { echo "[错误] 请先安装 Node.js 20/22+"; exit 1; }
+command -v java >/dev/null 2>&1 || { echo "[错误] 请先安装 JDK 17"; exit 1; }
+
 npm install --legacy-peer-deps
 npm run build
 
 if [ ! -d "android" ]; then
-  echo ">>> 2. 初始化 Capacitor Android 原生工程..."
+  echo ">>> [2/4] 初始化 Capacitor v6 Android 原生工程..."
   npm install --legacy-peer-deps @capacitor/core@^6.2.0 @capacitor/cli@^6.2.0 @capacitor/android@^6.2.0
   npx cap add android
+else
+  echo ">>> [2/4] 已检测到 android/ 目录，跳过初始化..."
 fi
 
-echo ">>> 3. 同步资源至 Android 工程..."
+echo ">>> [3/4] 同步资源至 Android 工程..."
 npx cap sync android
 
-echo ">>> 4. 编译生成 Android APK..."
+echo ">>> [4/4] 编译生成 Android APK..."
 cd android
 chmod +x ./gradlew
 ./gradlew assembleDebug
+cd ..
 
 echo ">>> 打包完成! APK 路径: android/app/build/outputs/apk/debug/app-debug.apk"
 `;
@@ -1015,18 +1182,29 @@ jobs:
           if-no-files-found: warn
 `;
 
+  const readOrFallback = (relPath: string, fallback: string) => {
+    try {
+      const p = path.resolve(process.cwd(), relPath);
+      if (fs.existsSync(p)) return fs.readFileSync(p, "utf8");
+    } catch {
+      // ignore
+    }
+    return fallback;
+  };
+
   res.json({
     success: true,
     files: {
-      "src-tauri/tauri.conf.json": JSON.stringify(tauriConfJson, null, 2),
-      "src-tauri/Cargo.toml": cargoToml,
-      "src-tauri/build.rs": buildRs,
+      "src-tauri/tauri.conf.json": readOrFallback("src-tauri/tauri.conf.json", JSON.stringify(tauriConfJson, null, 2)),
+      "src-tauri/Cargo.toml": readOrFallback("src-tauri/Cargo.toml", cargoToml),
+      "src-tauri/build.rs": readOrFallback("src-tauri/build.rs", buildRs),
       "src-tauri/src/main.rs": mainRs,
-      "build_tauri.bat": buildScript,
-      "capacitor.config.json": JSON.stringify(capacitorConfig, null, 2),
-      "build_android_apk.bat": buildApkBat,
-      "build_android_apk.sh": buildApkSh,
-      ".github/workflows/build-release.yml": githubBuildWorkflow
+      "build_tauri.bat": readOrFallback("build_tauri.bat", buildScript),
+      "capacitor.config.json": readOrFallback("capacitor.config.json", JSON.stringify(capacitorConfig, null, 2)),
+      "build_android_apk.bat": readOrFallback("build_android_apk.bat", buildApkBat),
+      "build_android_apk.sh": readOrFallback("build_android_apk.sh", buildApkSh),
+      ".github/workflows/build-release.yml": readOrFallback(".github/workflows/build-release.yml", githubBuildWorkflow),
+      ".github/workflows/deploy.yml": readOrFallback(".github/workflows/deploy.yml", "# GitHub Pages relative-path deploy workflow")
     }
   });
 });
@@ -1051,30 +1229,251 @@ app.get("/api/package/download/:target", (req, res) => {
   res.download(filePath, filename);
 });
 
-// API: Z-Library Login authentication
-app.post("/api/zlib/login", (req, res) => {
-  const { email, password, cookieToken } = req.body;
+// API: Z-Library Mirror Login & Cookie Verification (Supports both /api/auth-status + /login and classic /rpc.php; non-VIP 10/day)
+app.post("/api/zlib/login", async (req, res) => {
+  const email = (req.body?.email || "").trim();
+  const password = req.body?.password || "";
+  const cookieToken = (req.body?.cookieToken || "").trim();
+  const mirrorBase = normalizeMirrorUrl(req.body?.mirrorUrl || mirrors.find((m) => m.active)?.url);
+
   if (!email && !cookieToken) {
-    return res.status(400).json({ success: false, error: "请输入邮箱账号或 Remind-Me Cookie 凭证" });
+    return res.status(400).json({ success: false, error: "请输入邮箱账号或 Cookie 凭证" });
   }
 
-  const generatedId = `acc_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-  const userName = email ? email.split('@')[0] : `Zlib_User_${Math.floor(1000 + Math.random() * 9000)}`;
+  try {
+    if (email && password) {
+      // Check if mirror uses modern /api/auth-status + /login (e.g. z-lib.id)
+      let authMeta: any = null;
+      let sessionCookie = "";
+      try {
+        const { res: statusRes, cookieHeader } = await fetchWithCookieJar(`${mirrorBase}/api/auth-status`, {
+          headers: { Referer: `${mirrorBase}/login`, Accept: "application/json" },
+          timeoutMs: 8000
+        });
+        sessionCookie = cookieHeader;
+        const ct = statusRes.headers.get("content-type") || "";
+        if (statusRes.ok && ct.includes("application/json")) {
+          authMeta = await statusRes.json();
+        }
+      } catch {
+        authMeta = null;
+      }
 
-  res.json({
-    success: true,
-    user: {
-      id: generatedId,
-      email: email || (cookieToken ? `token_${cookieToken.slice(0, 8)}...` : "user@z-lib.se"),
-      name: userName,
-      dailyDownloadsLimit: 999,
-      downloadsRemaining: Math.floor(850 + Math.random() * 140),
-      isPremium: true,
-      remindMeToken: cookieToken || "zlib_session_token_sec_" + Math.random().toString(36).substring(2),
-      loginMethod: email ? 'password' : 'cookie',
-      addedAt: new Date().toLocaleDateString('zh-CN')
+      if (authMeta && authMeta.csrf_token) {
+        const formBody = new URLSearchParams({
+          _token: String(authMeta.csrf_token),
+          email,
+          password
+        }).toString();
+
+        const { res: loginRes, cookieHeader: afterCookie } = await fetchWithCookieJar(`${mirrorBase}/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Referer: `${mirrorBase}/login`,
+            Origin: mirrorBase
+          },
+          body: formBody,
+          cookie: sessionCookie
+        });
+        const loginHtml = await loginRes.text();
+
+        // Check updated auth-status
+        const { res: verifyRes } = await fetchWithCookieJar(`${mirrorBase}/api/auth-status`, {
+          headers: { Accept: "application/json" },
+          cookie: afterCookie
+        });
+        const verifyJson: any = await verifyRes.json().catch(() => null);
+
+        if (verifyJson?.authenticated && verifyJson?.user) {
+          const u = verifyJson.user;
+          return res.json({
+            success: true,
+            user: {
+              id: `acc_${Date.now()}`,
+              email: u.email || email,
+              name: u.name || email.split("@")[0],
+              dailyDownloadsLimit: 10,
+              downloadsRemaining: 10,
+              isPremium: false,
+              remindMeToken: afterCookie,
+              loginMethod: "password",
+              addedAt: new Date().toLocaleDateString("zh-CN"),
+              mirrorUrl: mirrorBase,
+              verified: true
+            }
+          });
+        }
+
+        if (/cf-turnstile|turnstile|captcha/i.test(loginHtml) || isCfChallenge(loginHtml)) {
+          return res.status(403).json({
+            success: false,
+            error: `镜像站 (${mirrorBase}) 的账号密码登录页启用了人机验证码 (Turnstile/Captcha)，客户端无法直接代填验证码。请点击上方「在浏览器打开」完成登录后复制 Cookie 导入。`
+          });
+        }
+
+        const errMatch = loginHtml.match(/class=["'][^"']*(?:alert-danger|error|invalid-feedback)[^"']*["'][^>]*>([\s\S]*?)<\/div>/i);
+        const errText = errMatch ? stripTags(errMatch[1]) : "";
+        return res.status(401).json({
+          success: false,
+          error: errText || `镜像站 (${mirrorBase}) 账号或密码校验未通过，如该站开启了人机验证请改用浏览器登录后导入 Cookie。`
+        });
+      }
+
+      // Classic Z-Library /rpc.php flow
+      const formBody = new URLSearchParams({
+        isModal: "true",
+        email,
+        password,
+        action: "login",
+        redirectUrl: "",
+        gg_json_mode: "1"
+      }).toString();
+
+      const { res: upstream, setCookies } = await fetchWithCookieJar(`${mirrorBase}/rpc.php`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+          Referer: mirrorBase,
+          Origin: mirrorBase
+        },
+        body: formBody
+      });
+
+      const bodyText = await upstream.text();
+      if (isCfChallenge(bodyText) || upstream.status === 403 || upstream.status === 513) {
+        return res.status(403).json({
+          success: false,
+          error: `镜像站 (${mirrorBase}) 触发了人机验证 (HTTP ${upstream.status})，无法直接提交账号密码。请先在浏览器打开镜像登录后提取 Cookie 免密导入。`
+        });
+      }
+
+      let parsed: any = null;
+      try {
+        parsed = JSON.parse(bodyText);
+      } catch {
+        parsed = null;
+      }
+
+      const respErr = parsed?.response?.validationError || parsed?.errors?.[0]?.message || parsed?.error;
+      if (respErr) {
+        return res.status(401).json({ success: false, error: `镜像站 (${mirrorBase}) 返回：${respErr}` });
+      }
+
+      const extractedCookie = setCookies
+        .map((c) => c.split(";")[0].trim())
+        .filter(Boolean)
+        .join("; ");
+
+      if (!extractedCookie && parsed?.response?.user_id === undefined) {
+        return res.status(401).json({
+          success: false,
+          error: `镜像站 (${mirrorBase}) 未返回登录会话凭证（HTTP ${upstream.status}），请改用浏览器登录后提取 Cookie 导入，或切换到 https://z-lib.id。`
+        });
+      }
+
+      return res.json({
+        success: true,
+        user: {
+          id: `acc_${Date.now()}`,
+          email,
+          name: email.split("@")[0],
+          dailyDownloadsLimit: 10,
+          downloadsRemaining: 10,
+          isPremium: false,
+          remindMeToken: extractedCookie || cookieToken,
+          loginMethod: "password",
+          addedAt: new Date().toLocaleDateString("zh-CN"),
+          mirrorUrl: mirrorBase,
+          verified: true
+        }
+      });
     }
-  });
+
+    // Cookie verification against active mirror
+    try {
+      const { res: authRes } = await fetchWithCookieJar(`${mirrorBase}/api/auth-status`, {
+        headers: { Accept: "application/json" },
+        cookie: cookieToken,
+        timeoutMs: 8000
+      });
+      const ct = authRes.headers.get("content-type") || "";
+      if (authRes.ok && ct.includes("application/json")) {
+        const authJson: any = await authRes.json();
+        if (authJson.authenticated && authJson.user) {
+          return res.json({
+            success: true,
+            user: {
+              id: `acc_${Date.now()}`,
+              email: authJson.user.email || `Cookie (${mirrorBase.replace(/^https?:\/\//, "")})`,
+              name: authJson.user.name || "Z-Lib 账号",
+              dailyDownloadsLimit: 10,
+              downloadsRemaining: 10,
+              isPremium: false,
+              remindMeToken: cookieToken,
+              loginMethod: "cookie",
+              addedAt: new Date().toLocaleDateString("zh-CN"),
+              mirrorUrl: mirrorBase,
+              verified: true
+            }
+          });
+        }
+        return res.json({
+          success: true,
+          warning: `已保存 Cookie，但 ${mirrorBase} 返回未登录状态（提示：若在 z-lib.id 登录请粘贴整条 Cookie 或 zlibrary_session 值）。`,
+          user: {
+            id: `acc_${Date.now()}`,
+            email: `Cookie (${mirrorBase.replace(/^https?:\/\//, "")})`,
+            name: "Z-Lib 账号",
+            dailyDownloadsLimit: 10,
+            downloadsRemaining: 10,
+            isPremium: false,
+            remindMeToken: cookieToken,
+            loginMethod: "cookie",
+            addedAt: new Date().toLocaleDateString("zh-CN"),
+            mirrorUrl: mirrorBase,
+            verified: false
+          }
+        });
+      }
+    } catch {
+      // fall through to classic check
+    }
+
+    const { res: upstream } = await fetchWithCookieJar(`${mirrorBase}/`, {
+      headers: { Referer: mirrorBase },
+      cookie: cookieToken
+    });
+    const html = await upstream.text();
+    const cfBlocked = isCfChallenge(html) || upstream.status === 403 || upstream.status === 513;
+    const quotaMatch = html.match(/(\d+)\s*\/\s*(\d+)/);
+    const isVip = !cfBlocked && /premium|vip|unlimited/i.test(html) && Number(quotaMatch?.[2] || 0) > 20;
+    const limit = isVip ? Number(quotaMatch?.[2] || 999) : 10;
+    const remaining = quotaMatch ? Math.min(limit, Number(quotaMatch[1])) : limit;
+
+    return res.json({
+      success: true,
+      warning: cfBlocked ? `镜像站 (${mirrorBase}) 触发人机拦截，Cookie 已绑定保存到本地。` : undefined,
+      user: {
+        id: `acc_${Date.now()}`,
+        email: `Cookie (${mirrorBase.replace(/^https?:\/\//, "")})`,
+        name: "Z-Lib 账号",
+        dailyDownloadsLimit: limit,
+        downloadsRemaining: remaining,
+        isPremium: isVip,
+        remindMeToken: cookieToken,
+        loginMethod: "cookie",
+        addedAt: new Date().toLocaleDateString("zh-CN"),
+        mirrorUrl: mirrorBase,
+        verified: !cfBlocked && upstream.ok
+      }
+    });
+  } catch (err: any) {
+    return res.status(502).json({
+      success: false,
+      error: formatMirrorNetworkError(err, mirrorBase)
+    });
+  }
 });
 
 if (process.env.NODE_ENV !== "production") {

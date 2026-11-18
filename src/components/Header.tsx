@@ -46,16 +46,16 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Main Navigation Bar (3-zone contract compliant) */}
-      <div className="flex items-center justify-between gap-4 sm:gap-8 px-4 sm:px-6 py-3 bg-white dark:bg-slate-900">
+      <div className="flex items-center justify-between gap-2 sm:gap-8 px-3 sm:px-6 py-2.5 sm:py-3 bg-white dark:bg-slate-900">
         {/* Zone 1: Brand Wordmark */}
-        <div className="flex items-center gap-2.5 shrink-0 cursor-pointer" onClick={() => setActiveTab('search')}>
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-md shadow-indigo-500/30 text-white shrink-0">
-            <BookOpen size={19} />
+        <div className="flex items-center gap-2 sm:gap-2.5 shrink-0 cursor-pointer" onClick={() => setActiveTab('search')}>
+          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-md shadow-indigo-500/30 text-white shrink-0">
+            <BookOpen size={18} />
           </div>
           <div>
             <h1 className="text-sm sm:text-base font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-1.5">
               <span>Zlib 下载器</span>
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+              <span className="hidden xs:inline-block sm:inline-block text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
                 Tauri
               </span>
             </h1>
@@ -133,10 +133,10 @@ export const Header: React.FC<HeaderProps> = ({
         </nav>
 
         {/* Zone 3: Primary Actions (Multi-Account Button, Theme, Settings) */}
-        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
           <button
             onClick={onOpenAccountManager}
-            className={`px-3 py-1.5 sm:py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 sm:gap-2 shadow-sm ${
+            className={`px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 sm:gap-2 shadow-sm ${
               activeAccount
                 ? 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700'
                 : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-600/20'
@@ -149,20 +149,15 @@ export const Header: React.FC<HeaderProps> = ({
                   <User size={15} className="text-indigo-600 dark:text-indigo-400" />
                   <span className="absolute -bottom-0.5 -right-0.5 w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
                 </div>
-                <span className="max-w-[70px] sm:max-w-[90px] truncate font-medium">
+                <span className="max-w-[75px] sm:max-w-[120px] truncate font-medium">
                   {activeAccount.name}
-                </span>
-                <span className="hidden sm:inline-flex px-1.5 py-0.2 rounded text-[10px] bg-amber-500/15 text-amber-600 dark:text-amber-400 font-bold border border-amber-500/30">
-                  VIP
-                </span>
-                <span className="hidden md:inline-flex px-1.5 py-0.2 rounded text-[10px] bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-mono">
-                  {activeAccount.downloadsRemaining}本
                 </span>
               </>
             ) : (
               <>
                 <Users size={15} />
-                <span>官方账号登录</span>
+                <span className="hidden sm:inline">官方账号登录</span>
+                <span className="sm:hidden">登录</span>
               </>
             )}
             {accountsCount > 1 && (

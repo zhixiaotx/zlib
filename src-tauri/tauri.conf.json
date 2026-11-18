@@ -5,7 +5,7 @@
     "beforeBuildCommand": "",
     "devPath": "http://localhost:3000",
     "distDir": "../dist",
-    "withGlobalTauri": false
+    "withGlobalTauri": true
   },
   "package": {
     "productName": "zlib-downloader",

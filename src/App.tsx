@@ -8,8 +8,30 @@ import { TauriPackagerModal } from './components/TauriPackagerModal';
 import { SettingsTab } from './components/SettingsTab';
 import { AISummaryModal } from './components/AISummaryModal';
 import { LoginModal } from './components/LoginModal';
+import { LocalBookModal, LocalBookReaderState } from './components/LocalBookModal';
 import { Book, DownloadTask, UserAccount, Mirror, AIConfig } from './types';
-import { searchZlibBooks } from './utils/standaloneApi';
+import {
+  deleteLocalBookBlob,
+  downloadBookFromMirror,
+  getLocalBookBlob,
+  LocalFolderFileItem,
+  openBookLocally,
+  openDownloadFolder,
+  openExternalUrl,
+  saveLocalBookBlob,
+  testMirrorsLatency
+} from './utils/standaloneApi';
+
+const DEFAULT_LIVE_MIRRORS: Mirror[] = [
+  { id: 'm-1', url: 'https://z-lib.id', status: 'online', latency: '120ms', active: true },
+  { id: 'm-2', url: 'https://z-lib.cc', status: 'online', latency: '160ms', active: false },
+  { id: 'm-3', url: 'https://z-library.sk', status: 'unstable', latency: '待测速', active: false },
+  { id: 'm-4', url: 'https://1lib.sk', status: 'unstable', latency: '待测速', active: false }
+];
+
+function isLegacySampleBook(b: Book): boolean {
+  return !b.sourceMirror && !b.savedPath && !b.localFileName && /^zlib-(10[1-5]|[1-9]|1[0-6])$/.test(b.id);
+}
 
 const DEFAULT_AI_PROFILE: AIConfig = {
   id: 'ai-google-default',
@@ -27,14 +49,21 @@ export default function App() {
   const [downloadTasks, setDownloadTasks] = useState<DownloadTask[]>(() => {
     try {
       const saved = localStorage.getItem('zlib_download_tasks');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed: DownloadTask[] = JSON.parse(saved);
+        return parsed.filter(t => !t.id.startsWith('seed-task-'));
+      }
     } catch (e) {}
     return [];
   });
   const [downloadedBooks, setDownloadedBooks] = useState<Book[]>(() => {
     try {
+      localStorage.removeItem('zlib_initial_seed_v1');
       const saved = localStorage.getItem('zlib_local_library');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed: Book[] = JSON.parse(saved);
+        return parsed.filter(b => !isLegacySampleBook(b));
+      }
     } catch (e) {}
     return [];
   });
@@ -73,43 +102,39 @@ export default function App() {
   const activeAIConfig = aiProfiles.find(p => p.id === activeAIProfileId) || aiProfiles[0] || DEFAULT_AI_PROFILE;
   const [aiModalBook, setAiModalBook] = useState<Book | null>(null);
   const [showLoginModal, setShowLoginModal] = useState(false);
+  const [localBookModal, setLocalBookModal] = useState<LocalBookReaderState | null>(null);
 
   // Mirrors state (Shared across MirrorsManager, LoginModal, and SearchSection)
-  const [mirrors, setMirrors] = useState<Mirror[]>([
-    { id: "m-1", url: "https://singlelogin.re", status: "online", latency: "142ms", active: true },
-    { id: "m-2", url: "https://z-lib.is", status: "online", latency: "198ms", active: false },
-    { id: "m-3", url: "https://z-lib.fm", status: "online", latency: "235ms", active: false },
-    { id: "m-4", url: "https://1lib.sk", status: "unstable", latency: "650ms", active: false }
-  ]);
+  const [mirrors, setMirrors] = useState<Mirror[]>(() => {
+    try {
+      const saved = localStorage.getItem('zlib_mirrors_v2');
+      if (saved) {
+        const parsed: Mirror[] = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return DEFAULT_LIVE_MIRRORS;
+  });
   const activeMirror = mirrors.find(m => m.active) || mirrors[0];
 
-  // Multi-Account Management State
+  // Multi-Account Management State (starts empty; removes legacy fake ScholarVIP seed if present)
   const [accounts, setAccounts] = useState<UserAccount[]>(() => {
     try {
       const saved = localStorage.getItem('zlib_accounts');
-      if (saved) return JSON.parse(saved);
-    } catch (e) {}
-    return [
-      {
-        id: 'acc-default-1',
-        email: 'scholar.vip@z-lib.se',
-        name: 'ScholarVIP',
-        dailyDownloadsLimit: 999,
-        downloadsRemaining: 968,
-        isPremium: true,
-        remindMeToken: '6d8f2a4e9b1c7d3e5f0a82b4c6e8',
-        loginMethod: 'cookie',
-        addedAt: '2026/11/17'
+      if (saved) {
+        const parsed: UserAccount[] = JSON.parse(saved);
+        return parsed.filter(a => a.id !== 'acc-default-1');
       }
-    ];
+    } catch (e) {}
+    return [];
   });
 
   const [activeAccountId, setActiveAccountId] = useState<string | null>(() => {
     try {
       const saved = localStorage.getItem('zlib_active_account_id');
-      if (saved) return saved;
+      if (saved && saved !== 'acc-default-1') return saved;
     } catch (e) {}
-    return 'acc-default-1';
+    return null;
   });
 
   // Sync to localStorage
@@ -175,42 +200,54 @@ export default function App() {
     });
   };
 
-  // Seed initial sample tasks and local library books on first visit so covers & pagination are immediately visible
+  // Persist mirrors list
   useEffect(() => {
     try {
-      const alreadySeeded = localStorage.getItem('zlib_initial_seed_v1');
-      if (alreadySeeded) return;
+      localStorage.setItem('zlib_mirrors_v2', JSON.stringify(mirrors));
     } catch (e) {}
+  }, [mirrors]);
 
-    searchZlibBooks({})
-      .then(data => {
-        if (data.success && Array.isArray(data.books) && data.books.length > 0) {
-          const sampleBooks: Book[] = data.books.slice(0, 6);
-          const sampleTasks: DownloadTask[] = data.books.slice(0, 5).map((b: Book, idx: number) => ({
-            id: `seed-task-${b.id}`,
-            bookId: b.id,
-            title: b.title,
-            author: b.author,
-            extension: b.extension,
-            filesize: b.filesize,
-            coverUrl: b.coverUrl,
-            progress: idx === 0 ? 68 : 100,
-            speed: idx === 0 ? '已暂停' : '0 KB/s',
-            eta: idx === 0 ? '剩余 4s' : '完成',
-            status: idx === 0 ? 'paused' : 'completed',
-            downloadedBytes: idx === 0 ? '5.7 MB' : b.filesize,
-            mirrorUrl: 'https://singlelogin.re'
-          }));
-
-          setDownloadedBooks(prev => (prev.length === 0 ? sampleBooks : prev));
-          setDownloadTasks(prev => (prev.length === 0 ? sampleTasks : prev));
-          try {
-            localStorage.setItem('zlib_initial_seed_v1', 'true');
-          } catch (e) {}
+  // Silently test mirror latency on startup so node statuses reflect real reachability
+  useEffect(() => {
+    let cancelled = false;
+    testMirrorsLatency(mirrors)
+      .then((tested) => {
+        if (!cancelled && Array.isArray(tested) && tested.length > 0) {
+          setMirrors(tested);
         }
       })
       .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  // Clean up any legacy fake seeded data on upgrade
+  useEffect(() => {
+    setDownloadTasks(prev => prev.filter(t => !t.id.startsWith('seed-task-')));
+    setDownloadedBooks(prev => prev.filter(b => !isLegacySampleBook(b)));
+    try {
+      localStorage.removeItem('zlib_initial_seed_v1');
+    } catch (e) {}
+  }, []);
+
+  const handleQuickSwitchMirror = (targetUrl: string) => {
+    const cleanTarget = targetUrl.trim().replace(/\/+$/, '');
+    setMirrors(prev => {
+      const exists = prev.some(m => m.url.replace(/\/+$/, '').toLowerCase() === cleanTarget.toLowerCase());
+      if (exists) {
+        return prev.map(m => ({
+          ...m,
+          active: m.url.replace(/\/+$/, '').toLowerCase() === cleanTarget.toLowerCase()
+        }));
+      }
+      return [
+        { id: `m-${Date.now()}`, url: cleanTarget, status: 'online', latency: '在线', active: true },
+        ...prev.map(m => ({ ...m, active: false }))
+      ];
+    });
+    showToast(`已切换镜像节点至 ${cleanTarget}`);
+  };
 
   // Sync dark mode class on html root
   useEffect(() => {
@@ -221,62 +258,97 @@ export default function App() {
     }
   }, [darkMode]);
 
-  // Simulate active download progress updates
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setDownloadTasks(prev =>
-        prev.map(task => {
-          if (task.status !== 'downloading') return task;
-          const nextProgress = task.progress + Math.floor(Math.random() * 8) + 2;
-          if (nextProgress >= 100) {
-            return { ...task, progress: 100, status: 'completed', speed: '0 KB/s', eta: '完成' };
-          }
-          const speeds = ['2.8 MB/s', '3.4 MB/s', '4.1 MB/s', '5.2 MB/s', '2.5 MB/s'];
-          const etas = ['4s', '3s', '2s', '1s', '5s'];
-          return {
-            ...task,
-            progress: nextProgress,
-            speed: speeds[Math.floor(Math.random() * speeds.length)],
-            eta: etas[Math.floor(Math.random() * etas.length)]
-          };
-        })
-      );
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, []);
-
-  const handleStartDownload = (book: Book) => {
-    if (downloadTasks.some(t => t.bookId === book.id)) {
-      setActiveTab('downloads');
-      return;
-    }
+  const handleStartDownload = async (book: Book) => {
+    const mirrorUrl = book.sourceMirror || (activeMirror ? activeMirror.url : 'https://z-lib.id');
+    const taskId = `task-${Date.now()}`;
 
     const newTask: DownloadTask = {
-      id: `task-${Date.now()}`,
+      id: taskId,
       bookId: book.id,
       title: book.title,
       author: book.author,
       extension: book.extension,
       filesize: book.filesize,
       coverUrl: book.coverUrl,
-      progress: 5,
-      speed: '3.6 MB/s',
-      eta: '5s',
+      progress: 20,
+      speed: '正在请求镜像节点...',
+      eta: '连接中',
       status: 'downloading',
-      downloadedBytes: `1.8 MB`,
-      mirrorUrl: activeMirror ? activeMirror.url : 'https://singlelogin.re'
+      downloadedBytes: '0 KB',
+      mirrorUrl,
+      detailUrl: book.detailUrl,
+      downloadUrl: book.downloadUrl
     };
 
-    setDownloadTasks(prev => [newTask, ...prev]);
+    setDownloadTasks(prev => [newTask, ...prev.filter(t => t.bookId !== book.id)]);
     setActiveTab('downloads');
 
-    setTimeout(() => {
-      setDownloadedBooks(prev => {
-        if (prev.some(b => b.id === book.id)) return prev;
-        return [book, ...prev];
-      });
-    }, 4500);
+    const res = await downloadBookFromMirror(book, mirrorUrl, activeAccount?.remindMeToken);
+
+    if (res.success) {
+      setDownloadTasks(prev =>
+        prev.map(t =>
+          t.id === taskId
+            ? {
+                ...t,
+                progress: 100,
+                status: 'completed',
+                speed: '已完成',
+                eta: '完成',
+                downloadedBytes: book.filesize,
+                savedPath: res.savedPath
+              }
+            : t
+        )
+      );
+      const savedBook: Book = {
+        ...book,
+        savedPath: res.savedPath || book.savedPath,
+        localFileName: res.localFileName || book.localFileName
+      };
+      setDownloadedBooks(prev => [savedBook, ...prev.filter(b => b.id !== book.id)]);
+      if (activeAccountId) {
+        setAccounts(prev =>
+          prev.map(a =>
+            a.id === activeAccountId
+              ? { ...a, downloadsRemaining: Math.max(0, a.downloadsRemaining - 1) }
+              : a
+          )
+        );
+      }
+      showToast(res.savedPath ? `已下载至：${res.savedPath}` : `已从镜像导出《${book.title}》`);
+    } else {
+      setDownloadTasks(prev =>
+        prev.map(t =>
+          t.id === taskId
+            ? {
+                ...t,
+                progress: 0,
+                status: 'failed',
+                speed: '需浏览器确认',
+                eta: '-',
+                errorMsg: res.error
+              }
+            : t
+        )
+      );
+      showToast(res.error || '正在为您打开镜像原页继续下载');
+      if (res.requiresBrowser && res.targetUrl) {
+        openExternalUrl(res.targetUrl);
+      }
+    }
+  };
+
+  const handleExportBook = async (book: Book) => {
+    const res = await downloadBookFromMirror(book, book.sourceMirror || activeMirror?.url, activeAccount?.remindMeToken);
+    if (res.success) {
+      showToast(res.savedPath ? `已导出至：${res.savedPath}` : `已重新导出《${book.title}》`);
+    } else {
+      showToast(res.error || '正在打开镜像原书页进行导出');
+      if (res.targetUrl) {
+        openExternalUrl(res.targetUrl);
+      }
+    }
   };
 
   const handlePauseTask = (id: string) => {
@@ -297,6 +369,124 @@ export default function App() {
 
   const handleRemoveLibraryBook = (id: string) => {
     setDownloadedBooks(prev => prev.filter(b => b.id !== id));
+    deleteLocalBookBlob(id);
+  };
+
+  const handleOpenFolder = async () => {
+    const res = await openDownloadFolder();
+    if (res.mode === 'native') {
+      showToast(res.path ? `已打开本地书库文件夹：${res.path}` : '已打开本地书库文件夹');
+      return;
+    }
+    setLocalBookModal({
+      mode: 'folder',
+      folderPath: res.path,
+      folderFiles: res.files
+    });
+  };
+
+  const handleOpenLocalBook = async (book: Book) => {
+    const res = await openBookLocally(book);
+    if (res.mode === 'native') {
+      showToast(`正在打开书籍：《${book.title}》`);
+      return;
+    }
+    if (res.mode === 'reader' && res.blob) {
+      setLocalBookModal({
+        mode: 'reader',
+        book,
+        blob: res.blob,
+        filename: res.filename,
+        mimeType: res.mimeType
+      });
+      return;
+    }
+    setLocalBookModal({
+      mode: 'reader',
+      book,
+      filename: res.filename,
+      needsFile: true,
+      message: res.error
+    });
+  };
+
+  const handleAttachLocalFile = async (file: File, targetBook?: Book) => {
+    const ext = (file.name.split('.').pop() || 'pdf').toLowerCase();
+    const sizeText =
+      file.size < 1024 * 1024
+        ? `${(file.size / 1024).toFixed(1)} KB`
+        : `${(file.size / (1024 * 1024)).toFixed(2)} MB`;
+
+    const bookId = targetBook?.id || `local-${Date.now()}`;
+    await saveLocalBookBlob(bookId, file.name, file.type || 'application/octet-stream', file);
+
+    const updatedBook: Book = targetBook
+      ? {
+          ...targetBook,
+          localFileName: file.name,
+          filesize: targetBook.filesize === '未知大小' ? sizeText : targetBook.filesize
+        }
+      : {
+          id: bookId,
+          title: file.name.replace(/\.[^.]+$/, ''),
+          author: '本地导入书籍',
+          year: String(new Date().getFullYear()),
+          publisher: '本地文件',
+          extension: ext,
+          filesize: sizeText,
+          language: '本地',
+          rating: 0,
+          coverUrl: '',
+          description: '从本地磁盘导入的电子书文件',
+          downloadsCount: 0,
+          sourceMirror: 'local',
+          localFileName: file.name
+        };
+
+    setDownloadedBooks(prev => [updatedBook, ...prev.filter(b => b.id !== updatedBook.id)]);
+    setLocalBookModal({
+      mode: 'reader',
+      book: updatedBook,
+      blob: file,
+      filename: file.name,
+      mimeType: file.type
+    });
+    showToast(`已打开本地书籍：《${updatedBook.title}》`);
+  };
+
+  const handleOpenBookByFileItem = async (item: LocalFolderFileItem) => {
+    if (item.source === 'browser' && item.bookId) {
+      const rec = await getLocalBookBlob(item.bookId);
+      if (rec?.blob) {
+        const matched = downloadedBooks.find(b => b.id === item.bookId);
+        setLocalBookModal({
+          mode: 'reader',
+          book: matched,
+          blob: rec.blob,
+          filename: rec.filename,
+          mimeType: rec.mimeType
+        });
+        return;
+      }
+    }
+    if (item.source === 'disk') {
+      try {
+        const res = await fetch(`/api/system/local-file?name=${encodeURIComponent(item.name)}`);
+        if (res.ok) {
+          const blob = await res.blob();
+          setLocalBookModal({
+            mode: 'reader',
+            blob,
+            filename: item.name,
+            mimeType: res.headers.get('content-type') || blob.type
+          });
+          return;
+        }
+      } catch {
+        // ignore
+      }
+    }
+    showToast('未能读取该文件内容');
   };
 
   // Multi-Account Action Handlers
@@ -364,6 +554,7 @@ export default function App() {
             activeAccount={activeAccount}
             onNavigateToMirrors={() => setActiveTab('mirrors')}
             onOpenLogin={() => setShowLoginModal(true)}
+            onQuickSwitchMirror={handleQuickSwitchMirror}
           />
         )}
 
@@ -373,7 +564,7 @@ export default function App() {
             onPauseTask={handlePauseTask}
             onResumeTask={handleResumeTask}
             onCancelTask={handleCancelTask}
-            onOpenFolder={() => showToast('已定位 Tauri 下载目录: C:\\Users\\Public\\ZLibraryDownloads')}
+            onOpenFolder={handleOpenFolder}
           />
         )}
 
@@ -381,8 +572,10 @@ export default function App() {
           <LocalLibrary
             downloadedBooks={downloadedBooks}
             onRemoveBook={handleRemoveLibraryBook}
-            onOpenFolder={() => showToast('已定位 Tauri 书库目录: C:\\Users\\Public\\ZLibraryDownloads')}
+            onOpenFolder={handleOpenFolder}
+            onOpenBook={handleOpenLocalBook}
             onOpenAISummary={(book) => setAiModalBook(book)}
+            onExportBook={handleExportBook}
           />
         )}
 
@@ -433,6 +626,15 @@ export default function App() {
           onLogoutCurrent={handleLogoutCurrent}
           onClose={() => setShowLoginModal(false)}
           onNavigateToMirrors={() => { setShowLoginModal(false); setActiveTab('mirrors'); }}
+        />
+      )}
+      {localBookModal && (
+        <LocalBookModal
+          state={localBookModal}
+          onClose={() => setLocalBookModal(null)}
+          onAttachLocalFile={handleAttachLocalFile}
+          onOpenBookByFileItem={handleOpenBookByFileItem}
+          onExportBook={handleExportBook}
         />
       )}
     </div>

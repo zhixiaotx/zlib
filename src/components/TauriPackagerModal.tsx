@@ -261,12 +261,12 @@ export const TauriPackagerModal: React.FC = () => {
             <span className="text-sm font-bold text-slate-900 dark:text-white font-mono">多端打包核心配置文件与脚本查看器</span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex items-center gap-1.5 max-w-full overflow-x-auto scrollbar-none pb-1 sm:pb-0">
             {Object.keys(configFiles).map((filename) => (
               <button
                 key={filename}
                 onClick={() => setActiveFile(filename)}
-                className={`px-2.5 py-1.5 text-xs font-mono rounded-lg transition-colors ${
+                className={`px-2.5 py-1.5 text-xs font-mono rounded-lg transition-colors whitespace-nowrap shrink-0 ${
                   activeFile === filename
                     ? 'bg-indigo-600 text-white font-semibold shadow'
                     : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'

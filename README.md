@@ -28,45 +28,48 @@
 
 ---
 
-## 🌟 核心三步操作工作流（选择镜像 -> 浏览器提取 Cookie -> 免密下载）
+## 🌟 核心三步操作工作流（选择镜像 -> 浏览器打开登录账号提取 Cookie -> 免密下载）
 
-为了给您提供与官方一致且不受网络防火墙干扰的下载体验，软件推荐以下三步标准流程：
+为了给您提供与官方一致且不受人机验证码干扰的下载体验，软件推荐以下三步标准流程：
 
 ```text
-【步骤 1：选择镜像节点】
-在软件的「镜像节点」中测试延迟，选择一个绿色的最优站点（如 https://singlelogin.re）。
+【步骤 1：选择可用镜像节点】
+在软件的「镜像节点」中自动测速，选择一个在线的绿色节点（如 https://z-lib.id 或 https://z-lib.cc）。
         ⬇
-【步骤 2：在电脑浏览器登录并提取凭证】
-点击“在浏览器打开”，在 Chrome / Edge / Firefox 中登录官方账号，按 F12 复制 remind_me Cookie。
+【步骤 2：在浏览器打开登录账号并提取凭证】
+在「账号中心」点击「浏览器打开登录账号」按钮，在 Chrome / Edge / Firefox 中完成账号登录与人机验证，按 F12 复制 zlibrary_session 或 remind_me Cookie。
         ⬇
-【步骤 3：填入账号中心并搜索下载】
-在软件右上角「账号中心」粘贴该 Cookie，系统立即获得 VIP 下载配额，在「书籍搜索」畅快下载！
+【步骤 3：填入 Cookie 免密登录并搜索下载】
+在软件右上角「账号中心」切换到「浏览器 Cookie 免密登录」粘贴凭证，系统立即校验证书与真实配额（非 VIP 普通账号默认每日 10 本），在「书籍搜索」检索真实馆藏！
 ```
 
 ---
 
-## 💡 重点：为什么要在电脑浏览器中登录 Z-Library 镜像并提取 Cookie？
+## 💡 重点：双登录协议说明 & 为什么建议用「浏览器打开登录账号」？
 
-很多刚接触 Z-Library 的小伙伴经常会问：*“为什么不能直接在软件里输入账号密码登录？为什么要多一步在电脑浏览器里登录并复制 Cookie 呢？”*
+很多刚接触 Z-Library 的小伙伴经常会问：*“为什么有时在软件里输入邮箱和密码会提示需要验证码，或者要用浏览器打开登录并复制 Cookie 呢？”*
 
-### 1. Cloudflare 5秒盾人机防御拦截
-Z-Library 官方及其公开镜像站点普遍配置了严苛的 **Cloudflare 5秒盾防火墙与 Turnstile 人机验证码**。如果任何第三方客户端或脚本直接向登录接口发送账号密码请求，Cloudflare 会立刻将其判定为机器人恶意攻击，直接返回 **`403 Forbidden`** 或 **`503 Service Temporarily Unavailable`** 阻断登录。
+### 1. 本项目已同步兼容新旧两大登录协议
+- **新架构镜像（如 `https://z-lib.id`）**：采用 **`GET /api/auth-status` + `POST /login`（含 CSRF `_token`）**，会话凭证字段为 **`zlibrary_session`**。如果该站点没有开启验证，客户端可直接完成登录；若登录页开启了 **Cloudflare Turnstile 人机验证码**，后台代理与桌面客户端无法代填图形验证。
+- **传统架构镜像（如 `z-library.sk` 等经典节点）**：采用 **`POST /rpc.php`** 接口登录，会话凭证字段为 **`remind_me`** / `remix_userkey`；若站点前置了 Cloudflare 5 秒盾或 DiamWall `__diamwall` 防护，同样会在浏览器外返回 403/513 拦截。
 
-### 2. 浏览器是官方认可的权威合法环境
-当您在电脑正规浏览器（Chrome、Edge、Firefox 或 Brave）中打开镜像站点并登录时，浏览器能够完美运行 Cloudflare 的 JavaScript 验证挑战脚本，顺利通过人机判定。验证通过后，官方服务器就会向您的浏览器颁发一张权威的登录通行证——名为 **`remind_me` 的会话 Cookie**。
+### 2. 「浏览器打开登录账号」一键打通闭环
+当您在软件 **「Z-Library 官方账号中心」**（或 **「镜像节点」**）点击 **「浏览器打开登录账号」** 时：
+1. 系统会自动使用本机默认浏览器打开当前选中的镜像 `/login` 登录页（Windows 桌面版通过 Tauri 原生壳呼出，网页与手机端通过安全外链打开）；
+2. 您在真实浏览器中可正常勾选通过 **Turnstile / Captcha 人机验证**，官方服务器会向浏览器颁发权威会话 Cookie（**`zlibrary_session`** 或 **`remind_me`**）；
+3. 复制该凭证回到软件粘贴到 **「浏览器 Cookie 免密登录」**，无论是服务端代理还是 Tauri 原生客户端，均会调用 `/api/auth-status` 或首页校验真实登录身份，**100% 绕过密码页人机验证码限制！**
 
-### 3. 免密授权，100% 绕过人机拦截
-这个 `remind_me` Cookie 包含了您账号的合法登录态、VIP 等级和专属高速下载通道权限。将它复制粘贴到本下载器后，软件后续发起的所有图书检索与下载请求，都带着这张权威通行证，从而 **100% 绕过 Cloudflare 验证码拦截**，绝不会弹窗阻断，享受高速稳定的满速文献下载！
-
-### 📋 30 秒提取凭证手把手教程：
-1. **浏览器打开镜像**：在电脑浏览器打开当前选中的镜像站点（例如 `https://singlelogin.re` 或 `https://z-lib.is`）。
-2. **正常登录**：输入您的 Z-Library 邮箱和密码，完成登录（如遇人机验证，勾选验证框通过）。
-3. **按 F12 键**：登录成功进入主页后，按键盘最上方的 **`F12`** 键（或在页面空白处点击鼠标**右键 -> 检查**）。
-4. **定位到 Cookies 表格**：
-   - **Chrome / Edge / 360 极速浏览器**：点击顶部标签栏的 **“Application”（应用程序）**，左侧展开 **Storage -> Cookies -> 点击当前站点域名**。
-   - **Firefox 火狐浏览器**：点击顶部标签栏的 **“Storage”（存储）**，左侧展开 **Cookies -> 点击当前站点域名**。
-5. **复制 Value 值**：在右侧列表中找到 Name 为 **`remind_me`** 的这一行，双击它的 **Value** 列，按 `Ctrl + C`（Mac 用户按 `Cmd + C`）复制这一长串字母与数字。
-6. **粘贴完成授权**：回到本下载器，点击右上角 **“账号登录” -> “添加新账号” -> “Remind-Me Cookie 免密登录”**，直接粘贴并点击“确认添加并登录”即可！
+### 📋 30 秒提取 Cookie 凭证手把手教程：
+1. **一键打开登录页**：在软件右上角 **「官方账号登录」** 弹窗中点击 **「浏览器打开登录账号」**（推荐在线镜像 `https://z-lib.id`）。
+2. **在浏览器正常登录**：输入 Z-Library 邮箱和密码，勾选通过人机验证码并登录成功。
+3. **按 F12 键打开控制台**：按键盘最上方 **`F12`** 键（或页面空白处**右键 -> 检查**）。
+4. **定位 Cookies 表格**：
+   - **Chrome / Edge / Brave**：顶部点 **Application（应用程序）** -> 左侧展开 **Storage -> Cookies -> 点击当前域名**；
+   - **Firefox 火狐浏览器**：顶部点 **Storage（存储）** -> 左侧展开 **Cookies -> 点击当前域名**。
+5. **复制凭证值**：
+   - 若使用的是 `z-lib.id` 等新镜像，找到 **`zlibrary_session`**，复制其 Value（也可以填入 `zlibrary_session=你的值` 或直接粘贴值，本软件会自动识别双格式！）；
+   - 若使用的是传统镜像，找到 **`remind_me`**，双击复制其 Value 值。
+6. **粘贴完成同步**：回到软件切换到 **「浏览器 Cookie 免密登录」**，粘贴并点击 **「确认添加并登录」** 即可！
 
 ---
 
@@ -84,71 +87,81 @@ Z-Library 官方及其公开镜像站点普遍配置了严苛的 **Cloudflare 5�
 ├── .gitignore
 │   └── Git 忽略规则文件。规定构建输出目录（dist/、android/、src-tauri/target/）与依赖目录（node_modules/）不提交到代码仓库，保持仓库干净。
 │
+├── bun.lock
+│   └── 依赖版本锁定文件，用于保证云端 CI 或合作者安装依赖时版本号严格一致。
+│
 ├── index.html
-│   └── 整个 Web 与移动端 App 的 HTML5 根入口文件。配置了中文语言声明（lang="zh-CN"）、viewport 移动端自适应缩放标签、SEO 标题描述以及防无状态沙箱报错的 WebSocket 守卫脚本。
+│   └── 整个 Web 与移动端 App 的 HTML5 根入口文件。配置了中文语言声明（lang="zh-CN"）、viewport-fit=cover 移动端刘海屏自适应、PWA 移动端元标签以及防无状态沙箱报错的 WebSocket 守卫脚本。
 │
 ├── metadata.json
-│   └── AI Studio 沙箱平台应用元数据清单。声明应用名称、功能描述以及服务端 Gemini API 调用能力。
+│   └── 应用元数据清单。声明应用名称、功能描述以及服务端 API 能力。
 │
 ├── package.json
-│   └── 项目的“身份证与管家”。记录了前端（React 19、Tailwind CSS v4、Motion、Lucide 图标）、后端（Express、tsx、@google/genai）依赖包清单，以及开发（npm run dev）、打包（npm run build）脚本命令。
+│   └── 项目的“身份证与管家”。记录前端（React 19、Tailwind CSS v4、Lucide 图标）、后端（Express、tsx、@google/genai）依赖与 esbuild@^0.28.0 兼容版本，以及 npm run dev / build / lint 命令。
 │
 ├── tsconfig.json
-│   └── TypeScript 编译器配置文件。设定严格类型检查标准与模块解析规则，提前在写代码阶段拦截低级错误。
+│   └── TypeScript 编译器配置文件。设定类型检查标准与模块解析规则，在构建前拦截语法与类型错误。
 │
 ├── vite.config.ts
-│   └── Vite 极速构建工具配置。核心配置了 base: './'（全站相对路径基准，确保 GitHub Pages 子目录、APK 本地 WebView 容器及虚拟主机永不 404 白屏），并禁用易报错的 HMR WebSocket。
+│   └── Vite 极速构建工具配置。核心配置了 base: './'（全站相对路径基准，确保 GitHub Pages gh-pages 子目录、APK 本地 WebView 容器及虚拟主机二级目录永不 404 白屏），并禁用易报错的 HMR WebSocket。
 │
 ├── server.ts
-│   └── Node.js 全栈后端核心服务（Express + tsx）。承担六大职责：
-│       1) Z-Library 官方检索与 16 本内置经典示例书库接口（/api/zlib/search）；
-│       2) 立体书皮封面矢量图（SVG Data URI）实时生成，确保断网也能清晰显示精装封面；
-│       3) 多镜像节点在线状态与毫秒延迟测速（/api/zlib/mirrors）；
-│       4) 官方账号密码与 remind_me Cookie 验证接口（/api/zlib/login）；
-│       5) 多大模型 AI 导读服务端安全代理（/api/gemini/summary 与 /api/ai/test），统一代发 Google Gemini、OpenAI、DeepSeek 及自定义兼容 API 请求，彻底解决浏览器跨域（CORS）拦截；
-│       6) 多端打包套件下载接口（/api/package/download/windows 与 /api/package/download/android），直接导出包含已编译 dist/ 的 Windows 与安卓打包压缩包。
+│   └── Node.js 全栈后端核心服务（Express + tsx）。承担八大职责：
+│       1) 内置 fetchWithCookieJar 自动 Cookie-Jar 重定向追踪，直连镜像（支持 /s?q= 与 /s/ 双格式）解析真实 HTML 书籍卡片（绝不预设或伪造示例书籍）；
+│       2) 自动识别 SSL 证书过期（CERT_HAS_EXPIRED）、域名失效（ENOTFOUND）、DiamWall (__diamwall HTTP 513) 与 Cloudflare 拦截并给出中文诊断；
+│       3) 书籍二进制真实流式下载、本地落盘与导出转发（/api/zlib/download，同步写入 ZLibraryDownloads 目录）；
+│       4) 本地书库文件夹真打开与目录文件读取（/api/system/open-folder、/api/system/local-files、/api/system/local-file）；
+│       5) 多镜像节点实时 HTTP 连通性与毫秒延迟测速（/api/zlib/mirrors/test，识别域名跳转劫持与证书过期）；
+│       6) 同步兼容 /api/auth-status + /login（含 CSRF _token、Turnstile 验证码识别与 zlibrary_session 校验）以及传统 /rpc.php（remind_me 校验），非 VIP 普通账号默认每日 10 本额度；
+│       7) 多大模型 AI 导读服务端安全代理（/api/gemini/summary 与 /api/ai/test），解决跨域限制；
+│       8) 多端打包配置读取与压缩套件下载接口（/api/tauri/config-files 与 /api/package/download/:target）。
 │
 ├── capacitor.config.json
-│   └── Android 移动端 APK 打包核心配置文件。定义了包名（com.zlib.downloader）、应用显示名称、打包输出目录（dist）以及 Android WebView HTTPS 安全策略。
+│   └── Android 移动端 APK 打包核心配置文件。定义包名（com.zlib.mobile.downloader）、应用名称、打包目录（dist）与 Android WebView HTTPS/混合内容策略。
 │
-├── build_android_apk.bat
-│   └── Windows 一键打包 Android .APK 批处理脚本。双击自动检测环境、安装 Capacitor Android 模块、同步前端编译资源并调用 Gradle 编译出原生 .apk 安装包。
-│
-├── build_android_apk.sh
-│   └── macOS / Linux 一键打包 Android .APK Shell 脚本。功能同上，适合 Mac 与 Linux 开发者在终端执行。
+├── build_android_apk.bat / build_android_apk.sh
+│   └── 一键打包 Android .APK 脚本（分别面向 Windows 批处理与 macOS/Linux Shell）。自动检测 Node 与 JDK 17，执行依赖安装、相对路径编译、Capacitor v6 初始化与 Gradle build。
 │
 ├── build_tauri.bat
-│   └── Windows 一键打包桌面版 .EXE 批处理脚本。自动构建前端并调用 Rust/Tauri 编译出 Windows 便携版和安装向导。
+│   └── Windows 一键打包桌面版 .EXE 批处理脚本（自动检测 Node 与 Rust Cargo）。自动安装依赖、编译前端并调用 Tauri v1.5 编译 Windows 便携版和 NSIS 安装向导。
+│
+├── zlib-downloader-*.zip / *.tar.gz
+│   └── 预先生成好的跨平台打包套件压缩包：
+│       - zlib-downloader-windows-tauri-package.zip（含 dist/ + src-tauri/ + build_tauri.bat）
+│       - zlib-downloader-android-apk-package.zip（含 dist/ + capacitor.config.json + build_android_apk.*）
+│       - zlib-downloader-tauri-bundle.zip（含全套前端/后端/桌面/安卓工程与工作流）
+│       - zlib-downloader-tauri-src.tar.gz（轻量化源码归档包）
 │
 ├── .github/workflows/
-│   ├── deploy.yml             # GitHub Pages 网页自动发布工作流：在 ubuntu-24.04 + Node 22 下以相对路径（base: './'）构建 dist/，并先打包推送到 gh-pages 分支后自动完成部署。
-│   └── build-release.yml      # 云端多端自动化构建工作流（已升级 Node 24 原生 Actions v4/v5/v6）：无需本地装 Android Studio 或 Rust，在 GitHub 云端自动编译生成 Android .apk 与 Windows .exe 安装包！
+│   ├── deploy.yml             # GitHub Pages 网页自动发布工作流：在 ubuntu-24.04 + Node 22 下以相对路径（base: './'）构建 dist/，先打包并推送至 gh-pages 分支后自动部署。
+│   └── build-release.yml      # 云端多端自动化构建工作流（已全面支持 Node 24 原生 Actions v4/v5/v6）：无需本地装 Android Studio 或 Rust，在 GitHub 云端直接出 Android .apk 与 Windows .exe 安装包！
 │
 ├── src-tauri/                 # Tauri v1.5 原生桌面应用核心目录（Rust 语言）
 │   ├── Cargo.toml             # Rust 项目的依赖清单（tauri 1.5、tokio 异步运行时、reqwest 下载器）。
-│   ├── build.rs               # Tauri v1.5 必需的编译期构建脚本（执行 tauri_build::build()），缺少会导致 Rust 编译报错。
-│   ├── tauri.conf.json        # 严格符合 Tauri v1.5 Schema 的桌面窗口配置文件（package 信息、tauri.bundle 打包、NSIS 安装向导规则与窗口尺寸 1200x800）。
-│   ├── icons/                 # 桌面端应用与安装向导所需的标准图标资源目录（32x32.png、128x128.png、128x128@2x.png、icon.ico）。
-│   └── src/main.rs            # Rust 程序入口，启动原生桌面 WebView 窗口并初始化底层多线程文件下载器。
+│   ├── build.rs               # Tauri v1.5 必需的编译期构建脚本（执行 tauri_build::build()）。
+│   ├── tauri.conf.json        # 严格符合 Tauri v1.5 Schema 的桌面窗口配置文件（package 信息、NSIS 安装向导规则与窗口尺寸）。
+│   ├── icons/                 # 桌面端应用图标资源目录（32x32.png、128x128.png、128x128@2x.png、icon.ico）。
+│   └── src/main.rs            # Rust 程序入口，注册 reqwest 原生 HTTP 代理、二进制文件下载以及系统文件夹/本地电子书调用命令（open_download_folder / open_local_book）。
 │
 └── src/                       # React 前端源代码核心目录
-    ├── main.tsx               # React 前端启动入口，把 App 组件渲染到 index.html 的 root 节点中。
-    ├── App.tsx                # 全局状态中枢。统一管控多账号切换、镜像节点、下载任务队列（含封面图）、本地书库、同模型多 API 列表、明暗主题及全局 Toast 轻提示。
-    ├── index.css              # 全局样式总入口。导入 Tailwind CSS v4 框架与滚动条美化规则。
-    ├── types.ts               # TypeScript 数据类型字典。严格定义了 Book（图书）、DownloadTask（下载任务含封面）、Mirror（镜像）、UserAccount（账号）、AIConfig（多 API 引擎配置）结构。
+    ├── main.tsx               # React 前端启动入口，挂载 App 组件至 index.html 的 root 节点。
+    ├── App.tsx                # 全局状态中枢。管理已验证的在线镜像列表（优先 z-lib.id / z-lib.cc）、启动自动测速、一键镜像切换、多账号持久切换、下载队列、真实本地书库（零示例数据）、多 AI API 列表与明暗主题。
+    ├── index.css              # 全局样式入口。导入 Tailwind CSS v4，提供移动端隐藏横向滚动条（.scrollbar-none）与安全区底部内边距适配。
+    ├── types.ts               # TypeScript 数据类型字典。定义 Book（含本地路径/文件名）、DownloadTask、Mirror、UserAccount、AIConfig 结构。
     ├── utils/
-    │   └── standaloneApi.ts   # 【关键】全端双模自适应接口层！自动检测当前是否运行在有 Express 后端的服务器环境：若在 Windows .exe、Android .apk 或 GitHub Pages / Vercel / Cloudflare 等纯静态环境中，无缝降级为客户端本地验证、内置精校书库检索、直接网络测速以及直连用户配置的 Gemini / OpenAI / DeepSeek API，彻底杜绝“无法连接到验证服务器”报错！
+    │   └── standaloneApi.ts   # 【核心】全端三模自适应通信与本地离线存储引擎！自动按 Express 后端 -> Tauri Rust 原生通道 -> 浏览器直连/IndexedDB 路由，支持 /s?q= 与 /s/ 双检索、/api/auth-status + /login 与 /rpc.php 双登录校验、zlibrary_session / remind_me 解析、真实文件夹与文件阅读打开。
     └── components/            # 模块化 UI 界面组件库
-        ├── Header.tsx         # 顶部导航栏。包含精简状态栏（已去除冗余假窗口控制按钮）、活跃账号 VIP 额度胶囊、明暗主题切换、设置按钮与移动端横向滑动导航条。
-        ├── SearchSection.tsx  # 书籍检索大厅。支持官方 4 种字段检索、精确匹配、热门标签、格式/语言筛选，展示带有立体封面图的卡片，并内置可调整每页显示数量的分页器。
-        ├── DownloadQueue.tsx  # 下载队列页面。展示每本书的高清封面缩略图、毫秒级进度条、实时速度与剩余时间，支持暂停/恢复/取消，并在任务多时自动分页显示。
-        ├── LocalLibrary.tsx   # 本地书库页面。以网格卡片形式展示已下载书籍的立体封面、文件大小与格式徽章，支持启动 AI 导读、定位本地目录，支持分页及每页数量切换。
-        ├── MirrorsManager.tsx # 镜像节点管理中心。提供官方与社区镜像测速、一键智能切换到最快节点，以及新增、编辑、删除自定义镜像站点。
-        ├── LoginModal.tsx     # 官方账号中心弹窗（统一 640px 高度规范）。支持多账号列表切换、配额进度条、密码登录、remind_me Cookie 免密登录、退出与删除账号。
-        ├── AISummaryModal.tsx # AI 图书精读导读弹窗（统一 640px 高度规范）。展示当前激活的模型引擎，自动调用后端代理或客户端直连生成结构化书评、核心思想与阅读建议。
-        ├── SettingsTab.tsx    # 全局设置中心。除了下载目录、并发线程设置外，内置完整的「AI 导读大模型多 API 管理中心」，支持同一模型下添加多个不同 API 配置，并对每条配置进行新增、编辑修改、连通性测试、删除与一键启用切换。
-        ├── TauriPackagerModal.tsx # 多端打包指导中心。提供 Windows 套件包与 Android 套件包的一键 ZIP 下载、双向构建教程及全套配置文件/脚本在线查看与导出功能。
-        └── Pagination.tsx     # 通用智能分页组件。支持首页/上一页/页码跳转/下一页/末页以及自定义“每页显示 X 条”，自动适配手机端和桌面端。
+        ├── Header.tsx         # 顶部导航栏。包含多端适配的紧凑品牌栏、多账号中心入口、明暗主题、设置按钮与移动端可横向滑动导航条。
+        ├── SearchSection.tsx  # 书籍检索大厅。不显示预设示例书籍；直连当前镜像检索，支持 4 种字段检索、出版年份与精确匹配；若当前节点异常提供“一键切换至可用镜像 (z-lib.id) 并重试”。
+        ├── DownloadQueue.tsx  # 下载队列页面。展示封面缩略图、实时状态与镜像源跳转；若镜像触发验证提示可一键打开原书页继续。
+        ├── LocalLibrary.tsx   # 本地书库页面。仅展示真实下载/导入书籍（无示例书），点击封面/标题/「打开」直接打开书籍阅读，「打开书库文件夹」直接呼出系统目录或内嵌文件浏览器。
+        ├── LocalBookModal.tsx # 本地书籍内嵌阅读器（支持 PDF/TXT 预览与本地导入绑定）与本地下载目录弹窗。
+        ├── MirrorsManager.tsx # 镜像节点管理中心。提供真实连通性测速、智能一键切到最快在线节点、浏览器登录按钮以及镜像增删改功能。
+        ├── LoginModal.tsx     # 官方账号中心弹窗（统一 640px 高度规范）。支持“浏览器打开登录账号”一键跳转、账号密码与 Cookie 双模切换、Turnstile 验证码指引及多账号配额管理。
+        ├── AISummaryModal.tsx # AI 图书精读导读弹窗（统一 640px 高度规范）。仅在点击「导读」按钮时呼出，支持多模型报告生成。
+        ├── SettingsTab.tsx    # 全局设置中心。支持同模型下多条 API 配置的新增、编辑、连通性测试、删除与一键启用切换。
+        ├── TauriPackagerModal.tsx # 多端打包指导中心。提供 Windows / Android 打包套件 ZIP 下载，以及实时的脚本与工作流在线查阅复制。
+        └── Pagination.tsx     # 通用智能分页组件。支持首页/上页/页码/下页/末页及每页条数切换，自动折叠适应小屏手机。
 ```
 
 ---
@@ -164,7 +177,7 @@ Z-Library 官方及其公开镜像站点普遍配置了严苛的 **Cloudflare 5�
    - 提交验证成功后，新账号会自动存入本地 `localStorage`，并立即激活为当前活跃账号。
 2. **秒级平滑切换**：
    - 打开账号中心，在“已存账号列表”中可以看到每个账号的卡片；
-   - 卡片上直观显示该账号今日的剩余下载额度进度条（如 `968 / 999 本`）与 VIP 标识；
+   - 卡片上直观显示该账号的每日配额进度条（如普通非 VIP 账号默认 `10 / 10 本`，以镜像真实返回为准）与所属节点；
    - 点击任意账号右侧的 **“切换至此”** 按钮，整个软件立即切换为该账号的会话凭证，搜索和下载无需重新启动！
 3. **安全退出与彻底删除**：
    - 点击卡片右侧的 **垃圾桶（删除）** 图标，即可将该账号从本设备中彻底抹除；
@@ -431,14 +444,18 @@ npm run dev
 
 ### 10. 打包成 Windows `.exe`、Android `.apk` 或部署纯静态网页后，点击登录报错“网络连接错误，无法连接到验证服务器”？
 - **原因**：在开发模式（`npm run dev`）下有本地 Express 后端监听 `/api/*` 接口；但打包成桌面 `.exe`（Tauri WebView）、手机 `.apk`（Capacitor WebView）或托管在 GitHub Pages / Cloudflare Pages / Vercel / Netlify / 虚拟主机时，容器内只有纯静态前端 `dist/` 文件，没有 Node 后端进程，因此原始 `fetch('/api/zlib/login')` 会报网络异常或返回 404 HTML。
-- **解法**：本项目已在 `src/utils/standaloneApi.ts` 中构建了**双模自适应层**（优先 3.5 秒内探测 `/api/*` JSON 响应，若处于独立客户端/静态托管环境则自动无感切换为客户端引擎）：
-  - **登录/切换多账号**：客户端本地校验并签发持久化 VIP 会话凭证，支持账号密码与 `remind_me` Cookie 免密登录；
-  - **搜索/封面/测速**：内置 SVG 立体封面实时生成器、全字段搜索过滤及浏览器端镜像延迟探测；
-  - **AI 导读与测试**：在「设置 → AI 导读大模型多 API 管理中心」填入您的 Gemini / OpenAI / DeepSeek / 兼容 API Key 后，客户端可**直接并发请求官方或自定义 Base URL**（若未填 Key 也会弹出中文引导说明）。
+- **解法**：本项目已在 `src/utils/standaloneApi.ts` 与 `src-tauri/src/main.rs` 中构建了**全端镜像直连通信层**（自动路由：`Express 后端代理 -> Tauri Rust 原生 reqwest 通道（.exe） -> 客户端直连`）：
+  - **双协议登录与浏览器一键打开**：同步兼容 `/api/auth-status + /login`（`zlibrary_session`）与传统 `/rpc.php`（`remind_me`），遇到 Turnstile 人机验证时提供「浏览器打开登录账号」按钮并支持粘贴两种 Cookie；非 VIP 账号默认每日 10 本额度；
+  - **真实镜像搜索与导出**：自动适配 `/s?q=...` 与 `/s/...` 双路径格式，解析真实书单与封面（绝不虚构不存在的示例书籍）；
+  - **AI 导读与测试**：在「设置 → AI 导读大模型多 API 管理中心」填入您的 Gemini / OpenAI / DeepSeek / 兼容 API Key 后，客户端可直接并发请求官方或自定义 Base URL。
 
 ### 11. GitHub Actions 构建时提示 `Node.js 20 is deprecated`、`setup-java v4 is deprecated` 或 `ubuntu-latest` 警告？
 - **原因**：GitHub Actions 逐步弃用 Node 20 运行时旧版插件与即将迁移的 `ubuntu-latest`。
 - **解法**：本项目的 `.github/workflows/deploy.yml` 与 `.github/workflows/build-release.yml` 已全面升级为 **`ubuntu-24.04`**，并将核心插件升级至原生 Node 24 支持版本（`actions/checkout@v6`、`actions/setup-node@v5`、`actions/setup-java@v5`、`android-actions/setup-android@v4`、`actions/upload-artifact@v6`、`peaceiris/actions-gh-pages@v4`），构建日志零弃用警告。
+
+### 12. 为什么老镜像节点如 `z-lib.fm` / `singlelogin.re` / `1lib.sk` 会提示 `fetch failed` 或连接异常？
+- **原因**：Z-Library 镜像域名经常动态轮换。实测老域名会出现 **SSL 证书过期（`CERT_HAS_EXPIRED`）**、**DNS 解析下线（`ENOTFOUND`）**、跳转广告页或触发 **`__diamwall` 重定向防爬拦截（HTTP 513）**。
+- **解法**：本项目已将默认活跃镜像切换为实测可稳定检索的 **`https://z-lib.id`** 与 **`https://z-lib.cc`**，同时在后端加入 Cookie-Jar 重定向跟踪与证书/域名精准中文报错；遇到节点失效时，搜索提示卡片上可直接点击 **「一键切换至可用镜像 (z-lib.id) 并重试」**。
 
 ---
 

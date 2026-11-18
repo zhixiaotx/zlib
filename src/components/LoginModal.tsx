@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { User, Lock, Key, CheckCircle2, X, Shield, LogOut, Plus, Trash2, Check, HelpCircle, ChevronDown, ChevronUp, Copy, ExternalLink, ArrowRight, Globe, Info } from 'lucide-react';
 import { UserAccount, Mirror } from '../types';
-import { loginZlibAccount } from '../utils/standaloneApi';
+import { loginZlibAccount, openExternalUrl } from '../utils/standaloneApi';
 
 interface LoginModalProps {
   accounts: UserAccount[];
@@ -36,9 +36,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [cookieToken, setCookieToken] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [warning, setWarning] = useState('');
   const [showWhyBrowser, setShowWhyBrowser] = useState(true);
   const [copiedStep, setCopiedStep] = useState(false);
-  const [selectedMirrorUrl, setSelectedMirrorUrl] = useState(activeMirror ? activeMirror.url : 'https://singlelogin.re');
+  const selectedMirrorUrl = activeMirror ? activeMirror.url : 'https://z-lib.id';
 
   const activeAccount = accounts.find(a => a.id === activeAccountId) || null;
 
@@ -46,14 +47,17 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     e.preventDefault();
     setLoading(true);
     setError('');
+    setWarning('');
 
     try {
       const data = await loginZlibAccount({
         email: loginMode === 'password' ? email.trim() : '',
         password: loginMode === 'password' ? password : '',
-        cookieToken: loginMode === 'cookie' ? cookieToken.trim() : ''
+        cookieToken: loginMode === 'cookie' ? cookieToken.trim() : '',
+        mirrorUrl: selectedMirrorUrl
       });
       if (data.success && data.user) {
+        if (data.warning) setWarning(data.warning);
         onAddAccount(data.user);
         setEmail('');
         setPassword('');
@@ -63,14 +67,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         setError(data.error || '登录验证失败，请检查账号密码或 Cookie');
       }
     } catch (err) {
-      setError('登录处理异常，请检查输入信息后重试');
+      setError('登录处理异常，请检查网络与镜像节点后重试');
     } finally {
       setLoading(false);
     }
   };
 
   const handleCopyGuide = () => {
-    const guideText = `【如何获取 Z-Library remind-me Cookie】\n1. 在电脑浏览器（Chrome / Edge / Firefox）打开当前镜像站点（如 ${selectedMirrorUrl}）\n2. 登录账号后按键盘 F12 打开开发者工具，点击【Application】(应用程序) 或【Storage】(存储)\n3. 左侧展开【Cookies】，点击当前站点域名\n4. 在列表中找到 Name 为 "remind_me" 的条目，双击复制其 Value 值\n5. 将该值粘贴到下载器中即可免密登录并绕过 Cloudflare 验证！`;
+    const guideText = `【如何获取 Z-Library 登录 Cookie】\n1. 在电脑浏览器（Chrome / Edge / Firefox）打开当前镜像站点（如 ${selectedMirrorUrl}）并完成账号登录（含人机验证码）\n2. 按键盘 F12 打开开发者工具，点击【Application】(应用程序) 或【Storage】(存储)\n3. 左侧展开【Cookies】，点击当前站点域名\n4. 找到 "zlibrary_session" 或 "remind_me"，复制完整 Cookie 字符串（例如 zlibrary_session=...）\n5. 将该值粘贴到下载器“Cookie 免密登录”输入框中即可继承账号下载配额！`;
     navigator.clipboard.writeText(guideText);
     setCopiedStep(true);
     setTimeout(() => setCopiedStep(false), 2000);
@@ -158,22 +162,21 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 当前关联镜像：<strong className="text-slate-900 dark:text-white font-mono">{selectedMirrorUrl}</strong>
               </span>
             </div>
-            <div className="flex items-center gap-2">
-              <a
-                href={formattedMirrorUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-2.5 py-1 rounded bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900 text-indigo-600 dark:text-indigo-400 font-medium transition-colors flex items-center gap-1"
-                title="在电脑浏览器打开此站点进行登录并获取 Cookie"
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => openExternalUrl(`${formattedMirrorUrl}/login`)}
+                className="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold transition-colors flex items-center gap-1 shadow-xs"
+                title="在电脑/手机浏览器打开当前镜像登录页完成验证码登录并提取 Cookie"
               >
-                <span>在浏览器打开</span>
+                <span>浏览器打开登录账号</span>
                 <ExternalLink size={12} />
-              </a>
+              </button>
               {onNavigateToMirrors && (
                 <button
                   type="button"
                   onClick={() => { onClose(); onNavigateToMirrors(); }}
-                  className="px-2.5 py-1 rounded bg-slate-200/80 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-medium transition-colors"
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-200/80 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-medium transition-colors"
                 >
                   更换镜像
                 </button>
@@ -198,7 +201,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             </div>
             {showWhyBrowser && (
               <p className="text-xs text-amber-800 dark:text-amber-300/90 leading-relaxed">
-                <strong>核心原理：</strong>官方 Z-Library 镜像站普遍配置了 <strong>Cloudflare 5秒盾人机防御（Turnstile / Captcha）</strong>。如果直接在客户端发起网络请求容易遭遇 403 阻断。在电脑浏览器（Chrome / Edge / Firefox）中打开镜像并登录，能正常通过人机验证并下发核心会话令牌 <code className="px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/60 font-mono font-bold text-amber-950 dark:text-amber-200">remind_me</code>。把该值填入本软件即可 100% 绕过阻断，直接继承账号全部 VIP 高速配额！
+                <strong>核心原理：</strong>多数 Z-Library 镜像站登录页启用了 <strong>Turnstile 人机验证码或防刷拦截</strong>，客户端后台无法代填图形验证码。在电脑浏览器（Chrome / Edge / Firefox）中打开镜像完成登录后，导出会话令牌 <code className="px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/60 font-mono font-bold text-amber-950 dark:text-amber-200">zlibrary_session=...</code> 或 <code className="px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/60 font-mono font-bold text-amber-950 dark:text-amber-200">remind_me</code> 粘贴到本软件即可直接同步登录态！
               </p>
             )}
           </div>
@@ -238,7 +241,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="space-y-1">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-bold text-slate-900 dark:text-white text-sm">
                                 {acc.name}
                               </span>
@@ -247,15 +250,15 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                                   当前活跃
                                 </span>
                               )}
-                              <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
-                                VIP 999本
+                              <span className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                                {acc.isPremium ? `捐赠版 · 每日 ${acc.dailyDownloadsLimit} 本` : `普通账号 · 每日 ${acc.dailyDownloadsLimit || 10} 本`}
                               </span>
                               <span className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
                                 {acc.loginMethod === 'cookie' ? 'Cookie 免密' : '密码授权'}
                               </span>
                             </div>
                             <div className="text-xs text-slate-500 font-mono">
-                              {acc.email}
+                              {acc.email}{acc.mirrorUrl ? ` · 节点 ${acc.mirrorUrl}` : ''}
                             </div>
                           </div>
 
@@ -330,13 +333,39 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                       : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
-                  Remind-Me Cookie 免密登录
+                  浏览器 Cookie 免密登录
                 </button>
               </div>
 
               {error && (
-                <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/50 text-red-600 dark:text-red-400 text-xs font-medium border border-red-200 dark:border-red-800">
-                  {error}
+                <div className="p-3.5 rounded-xl bg-red-50 dark:bg-red-950/50 text-red-700 dark:text-red-300 text-xs font-medium border border-red-200 dark:border-red-800 space-y-2.5">
+                  <p className="leading-relaxed">{error}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => openExternalUrl(`${formattedMirrorUrl}/login`)}
+                      className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-semibold inline-flex items-center gap-1 transition-colors"
+                    >
+                      <ExternalLink size={12} />
+                      <span>浏览器打开登录账号</span>
+                    </button>
+                    {loginMode === 'password' && (
+                      <button
+                        type="button"
+                        onClick={() => { setLoginMode('cookie'); setError(''); }}
+                        className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-[11px] font-semibold inline-flex items-center gap-1 transition-colors"
+                      >
+                        <Key size={12} />
+                        <span>改用 Cookie 免密导入</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {warning && (
+                <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 text-xs font-medium border border-amber-200 dark:border-amber-800">
+                  {warning}
                 </div>
               )}
 
@@ -405,7 +434,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                         type="text"
                         value={cookieToken}
                         onChange={(e) => setCookieToken(e.target.value)}
-                        placeholder="例如：6d8f2a4e9b1c7d3e5f0a... (直接粘贴值即可)"
+                        placeholder="粘贴 zlibrary_session=xxx 或 remind_me 的值（支持完整 document.cookie）"
                         className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
                         required
                       />
@@ -419,13 +448,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-indigo-900 dark:text-indigo-300 flex items-center gap-1.5">
                         <HelpCircle size={15} className="text-indigo-600 dark:text-indigo-400" />
-                        <span>小白指南：如何 30 秒获取 remind-me Cookie？</span>
+                        <span>小白指南：如何 30 秒获取登录 Cookie？</span>
                       </span>
                     </div>
 
                     <ol className="text-xs text-slate-600 dark:text-slate-400 space-y-1.5 list-decimal list-inside leading-relaxed font-sans">
                       <li>
-                        在电脑浏览器中访问并登录 Z-Library（当前镜像：<span className="font-mono text-indigo-600 dark:text-indigo-400">{selectedMirrorUrl}</span>）。
+                        在电脑浏览器中访问并登录 Z-Library（推荐在线镜像：<span className="font-mono text-indigo-600 dark:text-indigo-400">{selectedMirrorUrl}</span>）。
                       </li>
                       <li>
                         登录成功后，按键盘 <kbd className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-800 font-mono text-[11px]">F12</kbd> 键（或右键点击“检查”）。
@@ -437,19 +466,29 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                         在左侧栏展开 <strong className="text-slate-800 dark:text-slate-200">Cookies</strong>，点击当前登录的镜像域名。
                       </li>
                       <li>
-                        在表格中找到名为 <code className="bg-slate-200 dark:bg-slate-800 px-1 py-0.5 rounded font-mono text-indigo-600 dark:text-indigo-300">remind_me</code> 的条目，双击复制它的 <strong className="text-slate-800 dark:text-slate-200">Value</strong> 字符串并粘贴在上方即可！
+                        找到 <code className="bg-slate-200 dark:bg-slate-800 px-1 py-0.5 rounded font-mono text-indigo-600 dark:text-indigo-300">zlibrary_session</code>（输入为 <code className="font-mono">zlibrary_session=值</code>）或 <code className="bg-slate-200 dark:bg-slate-800 px-1 py-0.5 rounded font-mono text-indigo-600 dark:text-indigo-300">remind_me</code> 粘贴在上方即可！
                       </li>
                     </ol>
                   </div>
                 )}
 
-                <div className="pt-2 flex items-center gap-3">
+                <div className="pt-2 flex flex-wrap items-center gap-2.5">
                   <button
                     type="submit"
                     disabled={loading}
-                    className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold text-xs rounded-xl shadow-lg shadow-indigo-600/30 transition-all flex items-center justify-center gap-2"
+                    className="flex-1 min-w-[160px] py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold text-xs rounded-xl shadow-lg shadow-indigo-600/30 transition-all flex items-center justify-center gap-2"
                   >
                     {loading ? '正在验证并添加...' : '确认添加并登录'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => openExternalUrl(`${formattedMirrorUrl}/login`)}
+                    className="px-3.5 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs rounded-xl transition-colors inline-flex items-center gap-1.5"
+                    title="直接在浏览器中打开当前镜像站官方登录页"
+                  >
+                    <ExternalLink size={14} />
+                    <span>浏览器打开登录</span>
                   </button>
 
                   {accounts.length > 0 && (

@@ -14,6 +14,11 @@ export interface Book {
   isbn?: string;
   pages?: string;
   quality?: string;
+  detailUrl?: string;
+  downloadUrl?: string;
+  sourceMirror?: string;
+  savedPath?: string;
+  localFileName?: string;
 }
 
 export interface DownloadTask {
@@ -30,6 +35,10 @@ export interface DownloadTask {
   status: 'downloading' | 'paused' | 'completed' | 'failed';
   downloadedBytes: string;
   mirrorUrl: string;
+  detailUrl?: string;
+  downloadUrl?: string;
+  savedPath?: string;
+  errorMsg?: string;
 }
 
 export interface Mirror {
@@ -50,6 +59,8 @@ export interface UserAccount {
   remindMeToken: string;
   loginMethod: 'password' | 'cookie';
   addedAt: string;
+  mirrorUrl?: string;
+  verified?: boolean;
   personalDomain?: string;
   telegramBotLinked?: boolean;
 }

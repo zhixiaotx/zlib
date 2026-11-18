@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { HardDrive, BookOpen, Trash2, FolderOpen, Sparkles, Star } from 'lucide-react';
+import { HardDrive, BookOpen, Trash2, FolderOpen, Sparkles, Star, Download } from 'lucide-react';
 import { Book } from '../types';
 import { Pagination } from './Pagination';
 
@@ -7,14 +7,18 @@ interface LocalLibraryProps {
   downloadedBooks: Book[];
   onRemoveBook: (id: string) => void;
   onOpenFolder: () => void;
+  onOpenBook: (book: Book) => void;
   onOpenAISummary: (book: Book) => void;
+  onExportBook?: (book: Book) => void;
 }
 
 export const LocalLibrary: React.FC<LocalLibraryProps> = ({
   downloadedBooks,
   onRemoveBook,
   onOpenFolder,
-  onOpenAISummary
+  onOpenBook,
+  onOpenAISummary,
+  onExportBook
 }) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(6);
@@ -45,13 +49,13 @@ export const LocalLibrary: React.FC<LocalLibraryProps> = ({
             <span>本地已下载书库 ({downloadedBooks.length})</span>
           </h2>
           <p className="text-sm text-slate-500 mt-1">
-            管理您已下载并保存在本地下载目录中的 EPUB、PDF 与 MOBI 书籍。
+            点击任意书籍封面或标题即可直接打开阅读，也可通过右上角按钮浏览或导入本地电子书文件。
           </p>
         </div>
 
         <button
           onClick={onOpenFolder}
-          className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-xl transition-colors flex items-center gap-2 shadow-sm"
+          className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-xl transition-colors flex items-center gap-2 shadow-sm cursor-pointer"
         >
           <FolderOpen size={16} />
           <span>打开书库文件夹</span>
@@ -64,7 +68,7 @@ export const LocalLibrary: React.FC<LocalLibraryProps> = ({
             <BookOpen size={24} />
           </div>
           <h3 className="text-lg font-bold text-slate-900 dark:text-white">本地书库暂无书籍</h3>
-          <p className="text-sm text-slate-500 mt-1">下载完成的书籍将自动显示在此处。</p>
+          <p className="text-sm text-slate-500 mt-1">从当前镜像站下载的书籍将保存于此，您也可以点击「打开书库文件夹」导入本地书籍文件。</p>
         </div>
       ) : (
         <div className="space-y-6">
@@ -74,8 +78,12 @@ export const LocalLibrary: React.FC<LocalLibraryProps> = ({
                 key={book.id}
                 className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 flex gap-4 hover:shadow-xl hover:border-slate-300 dark:hover:border-slate-700 transition-all group"
               >
-                {/* Book Cover Image in Local Library */}
-                <div className="relative w-24 sm:w-28 h-36 sm:h-40 shrink-0 rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 shadow-md border border-slate-200 dark:border-slate-800 group-hover:scale-[1.02] transition-transform">
+                {/* Book Cover Image in Local Library - clicks open the book */}
+                <div
+                  onClick={() => onOpenBook(book)}
+                  title="点击打开书籍"
+                  className="relative w-24 sm:w-28 h-36 sm:h-40 shrink-0 rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 shadow-md border border-slate-200 dark:border-slate-800 group-hover:scale-[1.02] transition-transform cursor-pointer"
+                >
                   {book.coverUrl ? (
                     <img
                       src={book.coverUrl}
@@ -107,7 +115,8 @@ export const LocalLibrary: React.FC<LocalLibraryProps> = ({
                     </div>
                     <h3
                       className="text-sm sm:text-base font-bold text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors line-clamp-2 leading-snug cursor-pointer"
-                      onClick={() => onOpenAISummary(book)}
+                      onClick={() => onOpenBook(book)}
+                      title="点击打开书籍"
                     >
                       {book.title}
                     </h3>
@@ -118,24 +127,45 @@ export const LocalLibrary: React.FC<LocalLibraryProps> = ({
                       <span>{book.year}</span>
                     </div>
 
-                    <div className="flex items-center gap-1 text-amber-500 text-xs font-mono font-semibold mt-1">
-                      <Star size={12} className="fill-current" />
-                      <span>{book.rating.toFixed(1)}</span>
-                    </div>
+                    {book.rating > 0 && (
+                      <div className="flex items-center gap-1 text-amber-500 text-xs font-mono font-semibold mt-1">
+                        <Star size={12} className="fill-current" />
+                        <span>{book.rating.toFixed(1)}</span>
+                      </div>
+                    )}
                   </div>
 
-                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 grid grid-cols-2 gap-2">
+                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 grid grid-cols-2 gap-1.5">
+                    <button
+                      onClick={() => onOpenBook(book)}
+                      className="px-2 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1"
+                      title="直接打开阅读该书籍"
+                    >
+                      <BookOpen size={13} />
+                      <span>打开</span>
+                    </button>
+
+                    <button
+                      onClick={() => onExportBook && onExportBook(book)}
+                      className="px-2 py-1.5 bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900 text-indigo-600 dark:text-indigo-400 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1"
+                      title="从镜像站导出/保存电子书"
+                    >
+                      <Download size={13} />
+                      <span>导出</span>
+                    </button>
+
                     <button
                       onClick={() => onOpenAISummary(book)}
-                      className="px-2.5 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1"
+                      className="px-2 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1"
+                      title="使用 AI 总结导读"
                     >
                       <Sparkles size={13} className="text-amber-500" />
-                      <span>AI 导读</span>
+                      <span>导读</span>
                     </button>
 
                     <button
                       onClick={() => onRemoveBook(book.id)}
-                      className="px-2.5 py-1.5 bg-red-50 dark:bg-red-950/50 hover:bg-red-100 dark:hover:bg-red-900 text-red-600 dark:text-red-400 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1"
+                      className="px-2 py-1.5 bg-red-50 dark:bg-red-950/50 hover:bg-red-100 dark:hover:bg-red-900 text-red-600 dark:text-red-400 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1"
                     >
                       <Trash2 size={13} />
                       <span>移除</span>

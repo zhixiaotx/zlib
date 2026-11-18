@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Download, Pause, Play, Trash2, CheckCircle2, FolderOpen, ArrowDown, BookOpen } from 'lucide-react';
+import { Download, Pause, Play, Trash2, CheckCircle2, FolderOpen, ArrowDown, BookOpen, AlertTriangle, ExternalLink } from 'lucide-react';
 import { DownloadTask } from '../types';
+import { openExternalUrl } from '../utils/standaloneApi';
 import { Pagination } from './Pagination';
 
 interface DownloadQueueProps {
@@ -75,7 +76,9 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
         </div>
       ) : (
         <div className="space-y-4">
-          {paginatedTasks.map((task) => (
+          {paginatedTasks.map((task) => {
+            const mirrorTargetUrl = task.downloadUrl || task.detailUrl || task.mirrorUrl;
+            return (
             <div
               key={task.id}
               className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-sm flex flex-col sm:flex-row gap-4 sm:gap-5 hover:border-slate-300 dark:hover:border-slate-700 transition-all"
@@ -114,9 +117,25 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
                     </div>
                     <h4 className="text-base font-bold text-slate-900 dark:text-white truncate">{task.title}</h4>
                     <p className="text-xs text-slate-500 truncate">{task.author} · {task.filesize}</p>
+                    {task.status === 'failed' && task.errorMsg && (
+                      <p className="text-xs text-red-600 dark:text-red-400 break-words pt-0.5">{task.errorMsg}</p>
+                    )}
+                    {task.status === 'completed' && task.savedPath && (
+                      <p className="text-xs text-emerald-600 dark:text-emerald-400 font-mono truncate pt-0.5">已保存: {task.savedPath}</p>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
+                    {mirrorTargetUrl && (
+                      <button
+                        onClick={() => openExternalUrl(mirrorTargetUrl)}
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium transition-colors flex items-center gap-1"
+                        title="在浏览器打开镜像页面"
+                      >
+                        <ExternalLink size={14} />
+                        <span>原页</span>
+                      </button>
+                    )}
                     {task.status === 'downloading' && (
                       <button
                         onClick={() => onPauseTask(task.id)}
@@ -165,6 +184,11 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
                           <Pause size={14} /> 已暂停
                         </span>
                       )}
+                      {task.status === 'failed' && (
+                        <span className="flex items-center gap-1 text-red-600 dark:text-red-400 font-semibold">
+                          <AlertTriangle size={14} /> 未完成 / 需镜像验证
+                        </span>
+                      )}
                     </div>
                     <div className="text-slate-500">
                       {task.downloadedBytes} / {task.filesize} ({task.progress}%) {task.status === 'downloading' && `· 剩余时间: ${task.eta}`}
@@ -176,6 +200,8 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
                       className={`h-full rounded-full transition-all duration-300 ${
                         task.status === 'completed'
                           ? 'bg-emerald-500'
+                          : task.status === 'failed'
+                          ? 'bg-red-500'
                           : task.status === 'paused'
                           ? 'bg-amber-500'
                           : 'bg-gradient-to-r from-indigo-500 to-violet-600'
@@ -186,7 +212,8 @@ export const DownloadQueue: React.FC<DownloadQueueProps> = ({
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
 
           <Pagination
             currentPage={currentPage}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Globe, RefreshCw, Shield, Plus, Edit2, Trash2, Zap, Check, X, ExternalLink, ArrowRight, UserCheck, HelpCircle } from 'lucide-react';
 import { Mirror } from '../types';
-import { testMirrorsLatency } from '../utils/standaloneApi';
+import { testMirrorsLatency, openExternalUrl } from '../utils/standaloneApi';
 
 interface MirrorsManagerProps {
   mirrors: Mirror[];
@@ -140,8 +140,8 @@ export const MirrorsManager: React.FC<MirrorsManagerProps> = ({
         <div className="flex items-center gap-2 text-indigo-900 dark:text-indigo-200">
           <Shield size={16} className="text-emerald-500 shrink-0" />
           <span>
-            当前服务生效节点：<strong className="font-mono text-slate-900 dark:text-white">{activeMirror ? activeMirror.url : 'https://singlelogin.re'}</strong>
-            （延迟：{activeMirror ? activeMirror.latency : '142ms'}）
+            当前服务生效节点：<strong className="font-mono text-slate-900 dark:text-white">{activeMirror ? activeMirror.url : 'https://z-lib.id'}</strong>
+            （延迟：{activeMirror ? activeMirror.latency : '120ms'}）
           </span>
         </div>
 
@@ -185,9 +185,11 @@ export const MirrorsManager: React.FC<MirrorsManagerProps> = ({
                   <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
                     mirror.status === 'online'
                       ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800'
+                      : mirror.status === 'offline'
+                      ? 'bg-red-50 dark:bg-red-950/50 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800'
                       : 'bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800'
                   }`}>
-                    {mirror.status === 'online' ? '在线正常' : '波动不稳定'}
+                    {mirror.status === 'online' ? '在线正常' : mirror.status === 'offline' ? '不可达 / 已失效' : '需验证 / 波动'}
                   </span>
                   {mirror.active && (
                     <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
@@ -206,16 +208,15 @@ export const MirrorsManager: React.FC<MirrorsManagerProps> = ({
 
             <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <a
-                  href={formatUrl(mirror.url)}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <button
+                  type="button"
+                  onClick={() => openExternalUrl(`${formatUrl(mirror.url)}/login`)}
                   className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors flex items-center gap-1"
-                  title="在浏览器中打开此站点"
+                  title="在浏览器中打开此镜像登录账号"
                 >
                   <ExternalLink size={13} />
                   <span>浏览器登录</span>
-                </a>
+                </button>
 
                 <button
                   onClick={() => {
@@ -285,7 +286,7 @@ export const MirrorsManager: React.FC<MirrorsManagerProps> = ({
                     type="text"
                     value={urlInput}
                     onChange={(e) => setUrlInput(e.target.value)}
-                    placeholder="https://singlelogin.re 或 https://z-lib.is"
+                    placeholder="https://z-lib.id 或 https://z-lib.cc"
                     className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     required
                   />
