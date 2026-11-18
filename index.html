@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="theme-color" content="#4f46e5" />
+    <title>Z-Library 桌面下载器 (Tauri 多端打包版)</title>
+    <meta name="description" content="基于 Tauri、React 与 Node.js 的高性能 Z-Library 桌面文献下载器，支持实时下载进度条、多镜像源管理、本地书库、Gemini AI 书籍摘要以及 Windows .exe 便携版与安装包打包。" />
+    <meta property="og:title" content="Z-Library 桌面下载器 (Tauri 多端打包版)" />
+    <meta property="og:description" content="基于 Tauri、React 与 Node.js 的高性能 Z-Library 桌面文献下载器，支持实时下载进度条、多镜像源管理、本地书库、Gemini AI 书籍摘要以及 Windows .exe 便携版与安装包打包。" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      // Suppress Vite dev WebSocket/HMR warnings in iframe/sandboxed environments
+      window.addEventListener('unhandledrejection', function(event) {
+        var reason = event && event.reason ? event.reason : '';
+        var str = String(reason) + ' ' + String(reason && reason.stack ? reason.stack : '');
+        if (str.includes('WebSocket') || str.includes('vite') || str.includes('createWebSocketModuleRunnerTransport')) {
+          event.preventDefault();
+        }
+      });
+      window.addEventListener('error', function(event) {
+        var str = String(event && event.message ? event.message : '') + ' ' + String(event && event.filename ? event.filename : '');
+        if (str.includes('WebSocket') || str.includes('@vite/client') || str.includes('createWebSocketModuleRunnerTransport')) {
+          event.preventDefault();
+        }
+      });
+    </script>
+    <script type="module" crossorigin src="./assets/index-DR-bHiEp.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-BVeVbVz2.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
+
