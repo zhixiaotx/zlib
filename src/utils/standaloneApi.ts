@@ -1470,7 +1470,6 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: 'npm'
       - run: npm install --legacy-peer-deps
       - run: |
           npm run build
@@ -1502,7 +1501,6 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: 'npm'
       - uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
@@ -1530,7 +1528,6 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: 'npm'
       - uses: dtolnay/rust-toolchain@stable
       - name: 构建 Tauri Windows EXE
         run: |

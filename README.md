@@ -142,7 +142,7 @@
 │
 ├── .github/workflows/
 │   ├── deploy.yml             # GitHub Pages 网页自动发布工作流：在 ubuntu-24.04 + Node 22 下以相对路径（base: './'）构建 dist/，校验 ./assets/ 相对路径并生成 .nojekyll 与 404.html 后，推送至 gh-pages 分支触发部署。
-│   └── build-release.yml      # 云端多端自动化构建工作流（全面支持 Node 24 原生 Actions v4/v5/v6 + npm 缓存）：无需本地装 Android Studio 或 Rust，在 GitHub 云端直接出 Android .apk 与 Windows .exe 安装包！
+│   └── build-release.yml      # 云端多端自动化构建工作流（全面支持 Node 24 原生 Actions v4/v5/v6，不强制要求 package-lock.json）：无需本地装 Android Studio 或 Rust，在 GitHub 云端直接出 Android .apk 与 Windows .exe 安装包！
 │
 ├── src-tauri/                 # Tauri v1.5 原生桌面应用核心目录（Rust 语言）
 │   ├── Cargo.toml             # Rust 项目的依赖清单（tauri 1.5、tokio 异步运行时、reqwest 下载器）。
@@ -469,6 +469,10 @@ npm run dev
 ### 12. 为什么老镜像节点如 `z-lib.fm` / `singlelogin.re` / `1lib.sk` 会提示 `fetch failed` 或 HTTP 513 拦截？
 - **原因**：Z-Library 域名经常动态轮换，老域名存在 **SSL 证书过期（`CERT_HAS_EXPIRED`）**、**DNS 下线（`ENOTFOUND`）** 或触发 **`__diamwall` 重定向防爬拦截（HTTP 513）**。
 - **解法**：默认活跃镜像已更新为实测稳定在线的 **`https://z-lib.id`** 与 **`https://z-lib.cc`**；搜索异常时页面会自动给出 **「一键切换至可用镜像 (z-lib.id) 并重试」** 按钮，秒级恢复真实检索。
+
+### 13. GitHub Actions 报错 `Dependencies lock file is not found ... Supported file patterns: package-lock.json,npm-shrinkwrap.json,yarn.lock`？
+- **原因**：在 `actions/setup-node` 中启用 `cache: 'npm'` 时，GitHub Actions 会强行在仓库根目录查找 `package-lock.json` / `yarn.lock`；而本项目使用 `bun.lock` 管理锁定版本（未附带 `package-lock.json`），导致步骤直接报错中断。
+- **解法**：本项目已从 `.github/workflows/build-release.yml` 与 `.github/workflows/deploy.yml` 中移除 `cache: 'npm'` 参数，无需额外提交 `package-lock.json` 即可正常通过构建！
 
 ---
 
