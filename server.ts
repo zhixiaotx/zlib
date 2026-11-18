@@ -799,33 +799,54 @@ app.post("/api/ai/test", async (req, res) => {
 // API: Tauri & Android APK template files generator
 app.get("/api/tauri/config-files", (req, res) => {
   const tauriConfJson = {
-    "$schema": "../node_modules/@tauri-apps/cli/schema.json",
-    "productName": "zlib-downloader",
-    "version": "1.2.0",
-    "identifier": "com.zlib.desktop.app",
+    "$schema": "https://schema.tauri.app/config/1",
     "build": {
+      "beforeDevCommand": "",
+      "beforeBuildCommand": "",
       "devPath": "http://localhost:3000",
-      "distDir": "../dist"
+      "distDir": "../dist",
+      "withGlobalTauri": false
     },
-    "bundle": {
-      "active": true,
-      "targets": ["all"],
-      "icon": [
-        "icons/32x32.png",
-        "icons/128x128.png",
-        "icons/128x128@2x.png",
-        "icons/icon.icns",
-        "icons/icon.ico"
-      ],
-      "windows": {
-        "certificateSmarts": null,
-        "nsis": {
-          "installerIcon": "icons/icon.ico",
-          "headerImage": null,
-          "displayLanguageSelector": false,
-          "shortcutName": "Z-Library Downloader"
+    "package": {
+      "productName": "zlib-downloader",
+      "version": "1.2.0"
+    },
+    "tauri": {
+      "allowlist": {
+        "all": false,
+        "shell": {
+          "open": true
         }
-      }
+      },
+      "bundle": {
+        "active": true,
+        "targets": ["nsis"],
+        "identifier": "com.zlib.desktop.app",
+        "icon": [
+          "icons/32x32.png",
+          "icons/128x128.png",
+          "icons/128x128@2x.png",
+          "icons/icon.ico"
+        ],
+        "windows": {
+          "nsis": {
+            "installerIcon": "icons/icon.ico",
+            "displayLanguageSelector": false
+          }
+        }
+      },
+      "security": {
+        "csp": null
+      },
+      "windows": [
+        {
+          "fullscreen": false,
+          "resizable": true,
+          "title": "Z-Library 桌面下载器",
+          "width": 1200,
+          "height": 800
+        }
+      ]
     }
   };
 
@@ -851,6 +872,11 @@ default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 `;
 
+  const buildRs = `fn main() {
+  tauri_build::build()
+}
+`;
+
   const mainRs = `// Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -864,8 +890,9 @@ fn main() {
 
   const buildScript = `@echo off
 echo Building Z-Library Downloader Tauri App (.exe portable & installer)...
-npm run build
-cargo tauri build
+call npm install --legacy-peer-deps
+call npm run build
+call npx --yes @tauri-apps/cli@1.5 build
 echo Build completed! Check src-tauri/target/release/bundle/ for .exe installer and portable files.
 pause
 `;
@@ -888,11 +915,11 @@ pause
 echo ====================================================
 echo   Z-Library 下载器 Android APK 一键打包脚本 (Windows)
 echo ====================================================
-call npm install
+call npm install --legacy-peer-deps
 call npm run build
 if not exist android (
   echo 初始化 Capacitor Android 工程...
-  call npm install @capacitor/core @capacitor/cli @capacitor/android
+  call npm install --legacy-peer-deps @capacitor/core@^6.2.0 @capacitor/cli@^6.2.0 @capacitor/android@^6.2.0
   call npx cap add android
 )
 call npx cap sync android
@@ -906,12 +933,12 @@ pause
   const buildApkSh = `#!/usr/bin/env bash
 set -e
 echo ">>> 1. 构建前端相对路径静态包..."
-npm install
+npm install --legacy-peer-deps
 npm run build
 
 if [ ! -d "android" ]; then
   echo ">>> 2. 初始化 Capacitor Android 原生工程..."
-  npm install @capacitor/core @capacitor/cli @capacitor/android
+  npm install --legacy-peer-deps @capacitor/core@^6.2.0 @capacitor/cli@^6.2.0 @capacitor/android@^6.2.0
   npx cap add android
 fi
 
@@ -944,16 +971,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
+      - uses: android-actions/setup-android@v3
       - name: 构建 Web 并生成 Android APK
         run: |
-          npm install
+          npm install --legacy-peer-deps
           npm run build
-          npm install @capacitor/core @capacitor/cli @capacitor/android
+          npm install --legacy-peer-deps @capacitor/core@^6.2.0 @capacitor/cli@^6.2.0 @capacitor/android@^6.2.0
           npx cap add android || true
           npx cap sync android
           cd android && chmod +x ./gradlew && ./gradlew assembleDebug
@@ -962,6 +990,7 @@ jobs:
         with:
           name: zlib-downloader-android-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: warn
 
   build-windows-exe:
     runs-on: windows-latest
@@ -969,13 +998,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - uses: dtolnay/rust-toolchain@stable
       - name: 构建 Tauri Windows EXE
         run: |
-          npm install
+          npm install --legacy-peer-deps
           npm run build
-          npx @tauri-apps/cli@1.5 build
+          npx --yes @tauri-apps/cli@1.5 build
       - name: 上传 EXE 构建产物
         uses: actions/upload-artifact@v4
         with:
@@ -983,6 +1012,7 @@ jobs:
           path: |
             src-tauri/target/release/zlib-downloader.exe
             src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: warn
 `;
 
   res.json({
@@ -990,6 +1020,7 @@ jobs:
     files: {
       "src-tauri/tauri.conf.json": JSON.stringify(tauriConfJson, null, 2),
       "src-tauri/Cargo.toml": cargoToml,
+      "src-tauri/build.rs": buildRs,
       "src-tauri/src/main.rs": mainRs,
       "build_tauri.bat": buildScript,
       "capacitor.config.json": JSON.stringify(capacitorConfig, null, 2),

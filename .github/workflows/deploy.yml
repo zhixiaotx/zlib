@@ -21,14 +21,14 @@ jobs:
       - name: 检出仓库代码 (Checkout)
         uses: actions/checkout@v4
 
-      - name: 设置 Node.js 环境 (Node 18)
+      - name: 设置 Node.js 环境 (Node 22)
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 22
           cache: 'npm'
 
       - name: 安装项目依赖 (npm install)
-        run: npm install
+        run: npm install --legacy-peer-deps
 
       - name: 使用相对路径构建生产静态包 (npm run build)
         run: npm run build

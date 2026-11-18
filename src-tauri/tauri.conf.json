@@ -1,30 +1,51 @@
 {
-  "$schema": "../node_modules/@tauri-apps/cli/schema.json",
-  "productName": "zlib-downloader",
-  "version": "1.2.0",
-  "identifier": "com.zlib.desktop.app",
+  "$schema": "https://schema.tauri.app/config/1",
   "build": {
+    "beforeDevCommand": "",
+    "beforeBuildCommand": "",
     "devPath": "http://localhost:3000",
-    "distDir": "../dist"
+    "distDir": "../dist",
+    "withGlobalTauri": false
   },
-  "bundle": {
-    "active": true,
-    "targets": ["all"],
-    "icon": [
-      "icons/32x32.png",
-      "icons/128x128.png",
-      "icons/128x128@2x.png",
-      "icons/icon.icns",
-      "icons/icon.ico"
-    ],
-    "windows": {
-      "certificateSmarts": null,
-      "nsis": {
-        "installerIcon": "icons/icon.ico",
-        "headerImage": null,
-        "displayLanguageSelector": false,
-        "shortcutName": "Z-Library Downloader"
+  "package": {
+    "productName": "zlib-downloader",
+    "version": "1.2.0"
+  },
+  "tauri": {
+    "allowlist": {
+      "all": false,
+      "shell": {
+        "open": true
       }
-    }
+    },
+    "bundle": {
+      "active": true,
+      "targets": ["nsis"],
+      "identifier": "com.zlib.desktop.app",
+      "icon": [
+        "icons/32x32.png",
+        "icons/128x128.png",
+        "icons/128x128@2x.png",
+        "icons/icon.ico"
+      ],
+      "windows": {
+        "nsis": {
+          "installerIcon": "icons/icon.ico",
+          "displayLanguageSelector": false
+        }
+      }
+    },
+    "security": {
+      "csp": null
+    },
+    "windows": [
+      {
+        "fullscreen": false,
+        "resizable": true,
+        "title": "Z-Library 桌面下载器",
+        "width": 1200,
+        "height": 800
+      }
+    ]
   }
 }

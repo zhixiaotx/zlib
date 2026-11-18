@@ -78,6 +78,9 @@ Z-Library 官方及其公开镜像站点普遍配置了严苛的 **Cloudflare 5�
 ├── .env.example
 │   └── 环境变量模板文件。声明了 GEMINI_API_KEY、OPENAI_API_KEY、DEEPSEEK_API_KEY 及 PORT=3000 等配置模板（不含任何真实密钥）。
 │
+├── .npmrc
+│   └── npm 包管理器全局配置文件。内置 legacy-peer-deps=true，确保无论在 GitHub Actions、Vercel 还是本地电脑运行 npm install，都不会因 Vite 8 与 esbuild 对等依赖冲突而中断。
+│
 ├── .gitignore
 │   └── Git 忽略规则文件。规定构建输出目录（dist/、android/、src-tauri/target/）与依赖目录（node_modules/）不提交到代码仓库，保持仓库干净。
 │
@@ -122,8 +125,10 @@ Z-Library 官方及其公开镜像站点普遍配置了严苛的 **Cloudflare 5�
 │   └── build-release.yml      # 云端多端自动化构建工作流：无需本地装 Android Studio 或 Rust，在 GitHub 云端服务器自动编译生成 Android .apk 与 Windows .exe 安装包供直接下载！
 │
 ├── src-tauri/                 # Tauri 原生桌面应用核心目录（Rust 语言）
-│   ├── Cargo.toml             # Rust 项目的依赖清单（tauri、tokio 异步运行时、reqwest 下载器）。
-│   ├── tauri.conf.json        # Windows 桌面窗口配置文件（窗口尺寸 1200x800、应用图标、NSIS 安装向导规则）。
+│   ├── Cargo.toml             # Rust 项目的依赖清单（tauri 1.5、tokio 异步运行时、reqwest 下载器）。
+│   ├── build.rs               # Tauri v1.5 必需的编译期构建脚本（执行 tauri_build::build()），缺少会导致 Rust 编译报错。
+│   ├── tauri.conf.json        # 严格符合 Tauri v1.5 Schema 的桌面窗口配置文件（package 信息、tauri.bundle 打包、NSIS 安装向导规则与窗口尺寸 1200x800）。
+│   ├── icons/                 # 桌面端应用与安装向导所需的标准图标资源目录（32x32.png、128x128.png、128x128@2x.png、icon.ico）。
 │   └── src/main.rs            # Rust 程序入口，启动原生桌面 WebView 窗口并初始化底层多线程文件下载器。
 │
 └── src/                       # React 前端源代码核心目录
@@ -409,6 +414,18 @@ npm run dev
 
 ### 6. `remind_me` Cookie 会失效吗？
 - **解答**：正常情况下 `remind_me` 拥有数月至一年的长效期；但如果您在网页端手动点击了“退出登录（Logout）”，官方会作废该会话凭证。届时只需在浏览器重新登录一次并复制新的 `remind_me` 更新即可。
+
+### 7. GitHub Actions 运行 `npm install` 报错 `ERESOLVE: vite@8.3.8 vs esbuild@0.25`？
+- **原因**：`vite@8` 的可选对等依赖要求 `esbuild@^0.27.0 || ^0.28.0`，如果 `package.json` 写了低版本 `esbuild@^0.25.0` 或未开启兼容模式，npm 严格依赖解析会直接报错退出，导致后面找不到 `vite` 命令。同时 Vite 8 需要 Node `^20.19.0 || >=22.12.0`。
+- **解法**：本项目已将 `esbuild` 升级至 `^0.28.0`，新增 `.npmrc`（`legacy-peer-deps=true`），并在所有工作流中使用 `Node 22` + `npm install --legacy-peer-deps`，彻底解决冲突。
+
+### 8. Tauri 打包报错 `tauri.conf.json error: Additional properties are not allowed ('bundle', 'identifier', 'productName', 'version')`？
+- **原因**：这是 **Tauri v1 与 Tauri v2 配置文件格式混用** 导致的经典坑！`@tauri-apps/cli@1.5` 使用 v1 Schema，要求 `productName`/`version` 必须写在 `"package"` 对象内，`identifier`/`bundle`/`icon` 必须写在 `"tauri.bundle"` 对象内，同时必须具备 `src-tauri/build.rs` 和 `src-tauri/icons/icon.ico`。
+- **解法**：本项目已将 `src-tauri/tauri.conf.json` 修正为 100% 合法的 Tauri v1.5 格式，并补齐了 `build.rs` 与全套 `icons/` 图标文件，Windows CI 与本地打包均可直接通过。
+
+### 9. 打包 Android APK 时 Capacitor 与 Java JDK 版本冲突？
+- **原因**：Capacitor 7+ 要求 JDK 21，而主流打包环境默认配置的是 JDK 17，如果直接 `npm install @capacitor/android` 不指定版本会导致 Gradle 编译报错。
+- **解法**：脚本与工作流已显式锁定兼容 JDK 17 的 `@capacitor/core@^6.2.0 @capacitor/cli@^6.2.0 @capacitor/android@^6.2.0`，并配合 `android-actions/setup-android@v3` 自动配置 SDK。
 
 ---
 

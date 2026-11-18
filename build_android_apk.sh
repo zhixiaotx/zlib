@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -e
 echo ">>> 1. 构建前端相对路径静态包..."
-npm install
+npm install --legacy-peer-deps
 npm run build
 
 if [ ! -d "android" ]; then
   echo ">>> 2. 初始化 Capacitor Android 原生工程..."
-  npm install @capacitor/core @capacitor/cli @capacitor/android
+  npm install --legacy-peer-deps @capacitor/core@^6.2.0 @capacitor/cli@^6.2.0 @capacitor/android@^6.2.0
   npx cap add android
 fi
 

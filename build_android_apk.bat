@@ -2,11 +2,11 @@
 echo ====================================================
 echo   Z-Library 下载器 Android APK 一键打包脚本 (Windows)
 echo ====================================================
-call npm install
+call npm install --legacy-peer-deps
 call npm run build
 if not exist android (
   echo 初始化 Capacitor Android 工程...
-  call npm install @capacitor/core @capacitor/cli @capacitor/android
+  call npm install --legacy-peer-deps @capacitor/core@^6.2.0 @capacitor/cli@^6.2.0 @capacitor/android@^6.2.0
   call npx cap add android
 )
 call npx cap sync android
