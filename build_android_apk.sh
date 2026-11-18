@@ -1,11 +1,22 @@
 #!/usr/bin/env bash
 set -e
-echo ">>> [1/4] 安装依赖并构建前端相对路径静态包..."
+echo "===================================================="
+echo "  Z-Library 下载器 Android APK 一键打包脚本 (Linux/macOS)"
+echo "===================================================="
 command -v node >/dev/null 2>&1 || { echo "[错误] 请先安装 Node.js 20/22+"; exit 1; }
 command -v java >/dev/null 2>&1 || { echo "[错误] 请先安装 JDK 17"; exit 1; }
 
-npm install --legacy-peer-deps
-npm run build
+if [ -f "index.html" ]; then
+  echo ">>> [1/4] 安装依赖并构建前端相对路径静态包..."
+  npm install --legacy-peer-deps
+  npm run build
+elif [ -f "dist/index.html" ]; then
+  echo ">>> [1/4] 检测到预编译 dist/ 资源包，安装 Capacitor 核心工具..."
+  npm install --legacy-peer-deps @capacitor/core@^6.2.0 @capacitor/cli@^6.2.0 @capacitor/android@^6.2.0
+else
+  echo "[错误] 未找到 index.html 或 dist/index.html，请确认完整解压打包套件！"
+  exit 1
+fi
 
 if [ ! -d "android" ]; then
   echo ">>> [2/4] 初始化 Capacitor v6 Android 原生工程..."
@@ -25,4 +36,3 @@ chmod +x ./gradlew
 cd ..
 
 echo ">>> 打包完成! APK 路径: android/app/build/outputs/apk/debug/app-debug.apk"
-

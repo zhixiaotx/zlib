@@ -71,10 +71,32 @@ function normalizeMirrorUrl(raw?: string): string {
 }
 
 function formatZlibCookie(token?: string): string {
-  const raw = (token || "").trim();
+  const raw = (token || "")
+    .trim()
+    .replace(/^Cookie:\s*/i, "")
+    .replace(/\r?\n+/g, "; ")
+    .trim();
   if (!raw) return "";
   if (raw.includes("=")) return raw;
   return `zlibrary_session=${raw}; remind_me=${raw}; remix_userkey=${raw}`;
+}
+
+function parseCookieMeta(cookieStr: string): {
+  remixUserId: string;
+  remixUserKey: string;
+  zlibrarySession: string;
+  remindMe: string;
+} {
+  const getVal = (name: string) => {
+    const m = cookieStr.match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`, "i"));
+    return m ? m[1].trim() : "";
+  };
+  return {
+    remixUserId: getVal("remix_userid"),
+    remixUserKey: getVal("remix_userkey"),
+    zlibrarySession: getVal("zlibrary_session"),
+    remindMe: getVal("remind_me")
+  };
 }
 
 function decodeHtmlEntities(str: string): string {
@@ -1203,8 +1225,12 @@ jobs:
       "capacitor.config.json": readOrFallback("capacitor.config.json", JSON.stringify(capacitorConfig, null, 2)),
       "build_android_apk.bat": readOrFallback("build_android_apk.bat", buildApkBat),
       "build_android_apk.sh": readOrFallback("build_android_apk.sh", buildApkSh),
+      ".github/workflows/deploy.yml": readOrFallback(".github/workflows/deploy.yml", "# GitHub Pages relative-path deploy workflow"),
       ".github/workflows/build-release.yml": readOrFallback(".github/workflows/build-release.yml", githubBuildWorkflow),
-      ".github/workflows/deploy.yml": readOrFallback(".github/workflows/deploy.yml", "# GitHub Pages relative-path deploy workflow")
+      "vite.config.ts": readOrFallback("vite.config.ts", ""),
+      "vercel.json": readOrFallback("vercel.json", "{}"),
+      "netlify.toml": readOrFallback("netlify.toml", ""),
+      ".npmrc": readOrFallback(".npmrc", "legacy-peer-deps=true\n")
     }
   });
 });
@@ -1391,10 +1417,41 @@ app.post("/api/zlib/login", async (req, res) => {
     }
 
     // Cookie verification against active mirror
+    const formattedCookie = formatZlibCookie(cookieToken);
+    const cookieMeta = parseCookieMeta(formattedCookie);
+    const mirrorHost = mirrorBase.replace(/^https?:\/\//, "");
+    const defaultName = cookieMeta.remixUserId ? `Z-Lib (${cookieMeta.remixUserId})` : "Z-Lib 账号";
+    const defaultEmail = cookieMeta.remixUserId
+      ? `UID ${cookieMeta.remixUserId} (${mirrorHost})`
+      : `Cookie (${mirrorHost})`;
+    const isZlibIdCluster = /z-lib\.id|z-lib\.cc/i.test(mirrorBase);
+
+    // If user imported official-cluster remix_userid + remix_userkey while active mirror is z-lib.id/z-lib.cc,
+    // save immediately with an accurate cross-cluster explanation instead of triggering false auth-status warning.
+    if (isZlibIdCluster && cookieMeta.remixUserId && cookieMeta.remixUserKey && !cookieMeta.zlibrarySession) {
+      return res.json({
+        success: true,
+        warning: `已成功保存官方集群凭证 (remix_userid: ${cookieMeta.remixUserId})！该凭证用于 z-library.sk / 1lib.sk 等官方镜像；当前检索节点 (${mirrorBase}) 无需登录即可搜书，若要校验该凭证实时配额可切换至官方节点。`,
+        user: {
+          id: `acc_${Date.now()}`,
+          email: defaultEmail,
+          name: defaultName,
+          dailyDownloadsLimit: 10,
+          downloadsRemaining: 10,
+          isPremium: false,
+          remindMeToken: formattedCookie,
+          loginMethod: "cookie",
+          addedAt: new Date().toLocaleDateString("zh-CN"),
+          mirrorUrl: mirrorBase,
+          verified: false
+        }
+      });
+    }
+
     try {
       const { res: authRes } = await fetchWithCookieJar(`${mirrorBase}/api/auth-status`, {
         headers: { Accept: "application/json" },
-        cookie: cookieToken,
+        cookie: formattedCookie,
         timeoutMs: 8000
       });
       const ct = authRes.headers.get("content-type") || "";
@@ -1405,12 +1462,12 @@ app.post("/api/zlib/login", async (req, res) => {
             success: true,
             user: {
               id: `acc_${Date.now()}`,
-              email: authJson.user.email || `Cookie (${mirrorBase.replace(/^https?:\/\//, "")})`,
-              name: authJson.user.name || "Z-Lib 账号",
+              email: authJson.user.email || defaultEmail,
+              name: authJson.user.name || defaultName,
               dailyDownloadsLimit: 10,
               downloadsRemaining: 10,
               isPremium: false,
-              remindMeToken: cookieToken,
+              remindMeToken: formattedCookie,
               loginMethod: "cookie",
               addedAt: new Date().toLocaleDateString("zh-CN"),
               mirrorUrl: mirrorBase,
@@ -1420,15 +1477,15 @@ app.post("/api/zlib/login", async (req, res) => {
         }
         return res.json({
           success: true,
-          warning: `已保存 Cookie，但 ${mirrorBase} 返回未登录状态（提示：若在 z-lib.id 登录请粘贴整条 Cookie 或 zlibrary_session 值）。`,
+          warning: `已保存 Cookie，但 ${mirrorBase} 返回未登录状态（提示：z-lib.id 节点使用 zlibrary_session，而官网 z-library.sk 等使用 remix_userid + remix_userkey）。`,
           user: {
             id: `acc_${Date.now()}`,
-            email: `Cookie (${mirrorBase.replace(/^https?:\/\//, "")})`,
-            name: "Z-Lib 账号",
+            email: defaultEmail,
+            name: defaultName,
             dailyDownloadsLimit: 10,
             downloadsRemaining: 10,
             isPremium: false,
-            remindMeToken: cookieToken,
+            remindMeToken: formattedCookie,
             loginMethod: "cookie",
             addedAt: new Date().toLocaleDateString("zh-CN"),
             mirrorUrl: mirrorBase,
@@ -1440,9 +1497,48 @@ app.post("/api/zlib/login", async (req, res) => {
       // fall through to classic check
     }
 
+    // Classic Z-Library EAPI profile check (works with remix_userid + remix_userkey when mirror is reachable)
+    if (cookieMeta.remixUserId && cookieMeta.remixUserKey) {
+      try {
+        const { res: profileRes } = await fetchWithCookieJar(`${mirrorBase}/eapi/user/profile`, {
+          headers: { Accept: "application/json", Referer: mirrorBase },
+          cookie: formattedCookie,
+          timeoutMs: 8000
+        });
+        const ct = profileRes.headers.get("content-type") || "";
+        if (profileRes.ok && ct.includes("application/json")) {
+          const profileJson: any = await profileRes.json();
+          const u = profileJson?.user;
+          if (u && (u.id || u.email)) {
+            const limit = Number(u.downloads_limit) > 0 ? Number(u.downloads_limit) : 10;
+            const today = Number(u.downloads_today) >= 0 ? Number(u.downloads_today) : 0;
+            const remaining = Math.max(0, limit - today);
+            return res.json({
+              success: true,
+              user: {
+                id: `acc_${Date.now()}`,
+                email: u.email || defaultEmail,
+                name: u.name || defaultName,
+                dailyDownloadsLimit: limit,
+                downloadsRemaining: remaining,
+                isPremium: limit > 20,
+                remindMeToken: formattedCookie,
+                loginMethod: "cookie",
+                addedAt: new Date().toLocaleDateString("zh-CN"),
+                mirrorUrl: mirrorBase,
+                verified: true
+              }
+            });
+          }
+        }
+      } catch {
+        // fall through to homepage check
+      }
+    }
+
     const { res: upstream } = await fetchWithCookieJar(`${mirrorBase}/`, {
       headers: { Referer: mirrorBase },
-      cookie: cookieToken
+      cookie: formattedCookie
     });
     const html = await upstream.text();
     const cfBlocked = isCfChallenge(html) || upstream.status === 403 || upstream.status === 513;
@@ -1453,15 +1549,17 @@ app.post("/api/zlib/login", async (req, res) => {
 
     return res.json({
       success: true,
-      warning: cfBlocked ? `镜像站 (${mirrorBase}) 触发人机拦截，Cookie 已绑定保存到本地。` : undefined,
+      warning: cfBlocked
+        ? `镜像站 (${mirrorBase}) 触发人机防爬拦截 (HTTP ${upstream.status})，已本地保存 Cookie 凭证（${cookieMeta.remixUserId ? `UID ${cookieMeta.remixUserId}` : "Cookie"}）。`
+        : undefined,
       user: {
         id: `acc_${Date.now()}`,
-        email: `Cookie (${mirrorBase.replace(/^https?:\/\//, "")})`,
-        name: "Z-Lib 账号",
+        email: defaultEmail,
+        name: defaultName,
         dailyDownloadsLimit: limit,
         downloadsRemaining: remaining,
         isPremium: isVip,
-        remindMeToken: cookieToken,
+        remindMeToken: formattedCookie,
         loginMethod: "cookie",
         addedAt: new Date().toLocaleDateString("zh-CN"),
         mirrorUrl: mirrorBase,

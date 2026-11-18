@@ -529,7 +529,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans selection:bg-indigo-500 selection:text-white transition-colors">
       {toastMsg && (
-        <div className="fixed bottom-5 right-5 z-50 px-4 py-3 rounded-xl bg-slate-900 dark:bg-indigo-600 text-white text-xs font-semibold shadow-xl border border-slate-700/50 animate-in fade-in slide-in-from-bottom-2">
+        <div className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] left-3 right-3 sm:left-auto sm:right-5 sm:max-w-md z-50 px-4 py-3 rounded-xl bg-slate-900 dark:bg-indigo-600 text-white text-xs font-semibold shadow-xl border border-slate-700/50 animate-in fade-in slide-in-from-bottom-2 break-words">
           {toastMsg}
         </div>
       )}
@@ -544,7 +544,7 @@ export default function App() {
         onOpenAccountManager={() => setShowLoginModal(true)}
       />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-8">
         {activeTab === 'search' && (
           <SearchSection
             onStartDownload={handleStartDownload}

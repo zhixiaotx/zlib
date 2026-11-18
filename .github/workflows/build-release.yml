@@ -20,6 +20,7 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: 22
+          cache: 'npm'
 
       - name: 配置 Java JDK 17 环境
         uses: actions/setup-java@v5
@@ -30,12 +31,12 @@ jobs:
       - name: 配置 Android SDK 环境
         uses: android-actions/setup-android@v4
 
-      - name: 构建 Web 并编译 Android APK
+      - name: 构建相对路径 Web 资源并编译 Android APK
         run: |
           npm install --legacy-peer-deps
           npm run build
           npm install --legacy-peer-deps @capacitor/core@^6.2.0 @capacitor/cli@^6.2.0 @capacitor/android@^6.2.0
-          npx cap add android || true
+          if [ ! -d "android" ]; then npx cap add android; fi
           npx cap sync android
           cd android && chmod +x ./gradlew && ./gradlew assembleDebug
 
@@ -56,11 +57,12 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: 22
+          cache: 'npm'
 
       - name: 配置 Rust 编译链
         uses: dtolnay/rust-toolchain@stable
 
-      - name: 构建 Tauri Windows EXE 便携版与安装包
+      - name: 构建 Tauri Windows EXE 便携版与 NSIS 安装包
         run: |
           npm install --legacy-peer-deps
           npm run build

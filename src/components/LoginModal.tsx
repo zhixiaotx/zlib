@@ -31,8 +31,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
   // Add account form states
   const [loginMode, setLoginMode] = useState<'password' | 'cookie'>('password');
+  const [cookieInputMode, setCookieInputMode] = useState<'remix' | 'raw'>('remix');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [remixUserId, setRemixUserId] = useState('');
+  const [remixUserKey, setRemixUserKey] = useState('');
   const [cookieToken, setCookieToken] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -49,11 +52,23 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     setError('');
     setWarning('');
 
+    let finalCookieToken = cookieToken.trim();
+    if (loginMode === 'cookie' && cookieInputMode === 'remix') {
+      const cleanId = remixUserId.trim().replace(/^remix_userid\s*=\s*/i, '').replace(/;$/, '');
+      const cleanKey = remixUserKey.trim().replace(/^remix_userkey\s*=\s*/i, '').replace(/;$/, '');
+      if (!cleanId || !cleanKey) {
+        setError('请分别填写浏览器 Cookies 中的 remix_userid 和 remix_userkey 值（或点击切换为整行/单字段输入）');
+        setLoading(false);
+        return;
+      }
+      finalCookieToken = `remix_userid=${cleanId}; remix_userkey=${cleanKey}`;
+    }
+
     try {
       const data = await loginZlibAccount({
         email: loginMode === 'password' ? email.trim() : '',
         password: loginMode === 'password' ? password : '',
-        cookieToken: loginMode === 'cookie' ? cookieToken.trim() : '',
+        cookieToken: loginMode === 'cookie' ? finalCookieToken : '',
         mirrorUrl: selectedMirrorUrl
       });
       if (data.success && data.user) {
@@ -61,6 +76,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         onAddAccount(data.user);
         setEmail('');
         setPassword('');
+        setRemixUserId('');
+        setRemixUserKey('');
         setCookieToken('');
         setView('list');
       } else {
@@ -74,7 +91,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   };
 
   const handleCopyGuide = () => {
-    const guideText = `【如何获取 Z-Library 登录 Cookie】\n1. 在电脑浏览器（Chrome / Edge / Firefox）打开当前镜像站点（如 ${selectedMirrorUrl}）并完成账号登录（含人机验证码）\n2. 按键盘 F12 打开开发者工具，点击【Application】(应用程序) 或【Storage】(存储)\n3. 左侧展开【Cookies】，点击当前站点域名\n4. 找到 "zlibrary_session" 或 "remind_me"，复制完整 Cookie 字符串（例如 zlibrary_session=...）\n5. 将该值粘贴到下载器“Cookie 免密登录”输入框中即可继承账号下载配额！`;
+    const guideText = `【如何获取 Z-Library 登录 Cookie】\n1. 在电脑浏览器（Chrome / Edge / Firefox）打开当前镜像或常用 Z-Library 登录站（如 ${selectedMirrorUrl}）并完成账号登录\n2. 按键盘 F12 打开开发者工具，点击【Application】(应用程序) 或【Storage】(存储)\n3. 左侧展开【Cookies】，点击当前站点域名\n4. 最常见会看到 remix_userid 和 remix_userkey（其余 bsrv、c_token、selectedSiteMode 等无需填写）：分别复制它们的值填入下载器对应输入框即可\n5. 若当前节点出现的是 zlibrary_session 或 remind_me，切换为“单字段 / 整行 Cookie”模式粘贴即可`;
     navigator.clipboard.writeText(guideText);
     setCopiedStep(true);
     setTimeout(() => setCopiedStep(false), 2000);
@@ -201,7 +218,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             </div>
             {showWhyBrowser && (
               <p className="text-xs text-amber-800 dark:text-amber-300/90 leading-relaxed">
-                <strong>核心原理：</strong>多数 Z-Library 镜像站登录页启用了 <strong>Turnstile 人机验证码或防刷拦截</strong>，客户端后台无法代填图形验证码。在电脑浏览器（Chrome / Edge / Firefox）中打开镜像完成登录后，导出会话令牌 <code className="px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/60 font-mono font-bold text-amber-950 dark:text-amber-200">zlibrary_session=...</code> 或 <code className="px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/60 font-mono font-bold text-amber-950 dark:text-amber-200">remind_me</code> 粘贴到本软件即可直接同步登录态！
+                <strong>核心原理：</strong>多数 Z-Library 镜像站登录页启用了 <strong>Turnstile 人机验证码或防刷拦截</strong>，客户端后台无法代填图形验证码。在电脑浏览器中完成登录后，导出核心凭证 <code className="px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/60 font-mono font-bold text-amber-950 dark:text-amber-200">remix_userid</code> + <code className="px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/60 font-mono font-bold text-amber-950 dark:text-amber-200">remix_userkey</code>（部分站点为 <code className="px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/60 font-mono font-bold text-amber-950 dark:text-amber-200">zlibrary_session</code>）填入即可同步登录态！
               </p>
             )}
           </div>
@@ -216,7 +233,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   </div>
                   <h4 className="text-base font-bold text-slate-900 dark:text-white">暂未登录任何 Z-Library 账号</h4>
                   <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                    登录或导入 Remind-Me Cookie 可以提升每日下载配额与高带宽线路。
+                    登录账号或导入浏览器 Cookie（remix_userid / zlibrary_session）可同步账号每日下载额度。
                   </p>
                   <button
                     onClick={() => setView('add')}
@@ -411,11 +428,33 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     </div>
                   </>
                 ) : (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
-                        Remind-Me Cookie 凭证值
-                      </label>
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="inline-flex rounded-lg bg-slate-100 dark:bg-slate-800 p-0.5 text-[11px] font-semibold">
+                        <button
+                          type="button"
+                          onClick={() => setCookieInputMode('remix')}
+                          className={`px-2.5 py-1 rounded-md transition-all ${
+                            cookieInputMode === 'remix'
+                              ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                              : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                          }`}
+                        >
+                          remix_userid + remix_userkey
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCookieInputMode('raw')}
+                          className={`px-2.5 py-1 rounded-md transition-all ${
+                            cookieInputMode === 'raw'
+                              ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                              : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                          }`}
+                        >
+                          整行 / zlibrary_session
+                        </button>
+                      </div>
+
                       <button
                         type="button"
                         onClick={handleCopyGuide}
@@ -426,19 +465,68 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                       </button>
                     </div>
 
-                    <div className="relative">
-                      <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                        <Key size={16} />
-                      </span>
-                      <input
-                        type="text"
-                        value={cookieToken}
-                        onChange={(e) => setCookieToken(e.target.value)}
-                        placeholder="粘贴 zlibrary_session=xxx 或 remind_me 的值（支持完整 document.cookie）"
-                        className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                        required
-                      />
-                    </div>
+                    {cookieInputMode === 'remix' ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 flex items-center justify-between">
+                            <span>remix_userid 值</span>
+                            <span className="font-mono text-[10px] text-slate-400">必填</span>
+                          </label>
+                          <div className="relative">
+                            <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                              <User size={15} />
+                            </span>
+                            <input
+                              type="text"
+                              value={remixUserId}
+                              onChange={(e) => setRemixUserId(e.target.value)}
+                              placeholder="复制 remix_userid 的值"
+                              className="w-full pl-9 pr-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100 text-xs sm:text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                              required
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 flex items-center justify-between">
+                            <span>remix_userkey 值</span>
+                            <span className="font-mono text-[10px] text-slate-400">必填</span>
+                          </label>
+                          <div className="relative">
+                            <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                              <Key size={15} />
+                            </span>
+                            <input
+                              type="text"
+                              value={remixUserKey}
+                              onChange={(e) => setRemixUserKey(e.target.value)}
+                              placeholder="复制 remix_userkey 的值"
+                              className="w-full pl-9 pr-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100 text-xs sm:text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                              required
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                          完整 Cookie / zlibrary_session / remind_me 凭证值
+                        </label>
+                        <div className="relative">
+                          <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                            <Key size={16} />
+                          </span>
+                          <input
+                            type="text"
+                            value={cookieToken}
+                            onChange={(e) => setCookieToken(e.target.value)}
+                            placeholder="粘贴 zlibrary_session=... 或 remix_userid=...; remix_userkey=..."
+                            className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            required
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -448,25 +536,19 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-indigo-900 dark:text-indigo-300 flex items-center gap-1.5">
                         <HelpCircle size={15} className="text-indigo-600 dark:text-indigo-400" />
-                        <span>小白指南：如何 30 秒获取登录 Cookie？</span>
+                        <span>小白指南：如何对照 F12 提取 Cookie？（已适配您看到的字段）</span>
                       </span>
                     </div>
 
                     <ol className="text-xs text-slate-600 dark:text-slate-400 space-y-1.5 list-decimal list-inside leading-relaxed font-sans">
                       <li>
-                        在电脑浏览器中访问并登录 Z-Library（推荐在线镜像：<span className="font-mono text-indigo-600 dark:text-indigo-400">{selectedMirrorUrl}</span>）。
+                        在电脑浏览器访问并登录 Z-Library，按键盘 <kbd className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-800 font-mono text-[11px]">F12</kbd> 键，进入 <strong className="text-slate-800 dark:text-slate-200">Application / Storage → Cookies</strong> 点击当前域名。
                       </li>
                       <li>
-                        登录成功后，按键盘 <kbd className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-800 font-mono text-[11px]">F12</kbd> 键（或右键点击“检查”）。
+                        <strong className="text-slate-800 dark:text-slate-200">官方节点最常见字段</strong>：如果您只看到了 <code className="bg-slate-200 dark:bg-slate-800 px-1 py-0.5 rounded font-mono text-indigo-600 dark:text-indigo-300">remix_userid</code>、<code className="bg-slate-200 dark:bg-slate-800 px-1 py-0.5 rounded font-mono text-indigo-600 dark:text-indigo-300">remix_userkey</code>（以及 bsrv / c_token / selectedSiteMode），<strong>只需双击复制 <code className="font-mono">remix_userid</code> 和 <code className="font-mono">remix_userkey</code> 的值分别填入上方两格即可</strong>，其余字段无需填写！
                       </li>
                       <li>
-                        在顶部切换至 <strong className="text-slate-800 dark:text-slate-200">Application</strong>（应用程序）标签页（Firefox 为 <strong className="text-slate-800 dark:text-slate-200">Storage</strong> 存储）。
-                      </li>
-                      <li>
-                        在左侧栏展开 <strong className="text-slate-800 dark:text-slate-200">Cookies</strong>，点击当前登录的镜像域名。
-                      </li>
-                      <li>
-                        找到 <code className="bg-slate-200 dark:bg-slate-800 px-1 py-0.5 rounded font-mono text-indigo-600 dark:text-indigo-300">zlibrary_session</code>（输入为 <code className="font-mono">zlibrary_session=值</code>）或 <code className="bg-slate-200 dark:bg-slate-800 px-1 py-0.5 rounded font-mono text-indigo-600 dark:text-indigo-300">remind_me</code> 粘贴在上方即可！
+                        <strong className="text-slate-800 dark:text-slate-200">独立镜像节点（如 z-lib.id）</strong>：若列表里出现的是 <code className="bg-slate-200 dark:bg-slate-800 px-1 py-0.5 rounded font-mono text-indigo-600 dark:text-indigo-300">zlibrary_session</code> 或 <code className="font-mono">remind_me</code>，可点击上方切换为「整行 / zlibrary_session」模式粘贴。
                       </li>
                     </ol>
                   </div>

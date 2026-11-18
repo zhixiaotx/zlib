@@ -24,7 +24,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAccountManager
 }) => {
   return (
-    <header className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border-b border-slate-200 dark:border-slate-800 select-none shadow-sm transition-colors sticky top-0 z-40">
+    <header className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border-b border-slate-200 dark:border-slate-800 select-none shadow-sm transition-colors sticky top-0 z-40 pt-[env(safe-area-inset-top)]">
       {/* Fake OS Window Title Bar */}
       <div className="flex items-center justify-between px-3 sm:px-4 py-1.5 border-b border-slate-100 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-950">
         <div className="flex items-center gap-2 truncate">

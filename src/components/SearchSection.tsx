@@ -272,8 +272,8 @@ export const SearchSection: React.FC<SearchSectionProps> = ({
         {/* Input Bar */}
         <form onSubmit={handleSearchSubmit} className="space-y-4">
           <div className="relative flex items-center">
-            <span className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none text-slate-400">
-              <Search size={20} />
+            <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 sm:pl-4 pointer-events-none text-slate-400">
+              <Search size={18} className="sm:w-5 sm:h-5" />
             </span>
             <input
               type="text"
@@ -281,20 +281,20 @@ export const SearchSection: React.FC<SearchSectionProps> = ({
               onChange={(e) => setQuery(e.target.value)}
               placeholder={
                 searchField === 'title'
-                  ? '输入书名，如：三体、代码整洁之道、深入理解计算机系统...'
+                  ? '输入书名，如：三体、代码整洁之道...'
                   : searchField === 'author'
-                  ? '输入作者姓名，如：刘慈欣、Martin Kleppmann、Robert C. Martin...'
+                  ? '输入作者姓名，如：刘慈欣、Martin Kleppmann...'
                   : searchField === 'isbn'
-                  ? '输入 ISBN 号或出版商，如：978-7-5366-9290-9、O\'Reilly、人民邮电...'
-                  : '搜索 Z-Library 海量藏书（输入书名、作者、ISBN 或关键词）...'
+                  ? '输入 ISBN 号或出版商...'
+                  : '搜索 Z-Library 藏书（书名、作者、ISBN）...'
               }
-              className="w-full pl-12 pr-28 sm:pr-32 py-3.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-medium text-sm sm:text-base"
+              className="w-full pl-10 sm:pl-12 pr-24 sm:pr-32 py-3 sm:py-3.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-medium text-sm sm:text-base"
             />
             {query && (
               <button
                 type="button"
                 onClick={() => { setQuery(''); fetchBooks('', searchField); }}
-                className="absolute right-24 sm:right-28 p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                className="absolute right-20 sm:right-28 p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
                 title="清空输入"
               >
                 <X size={16} />
@@ -302,19 +302,19 @@ export const SearchSection: React.FC<SearchSectionProps> = ({
             )}
             <button
               type="submit"
-              className="absolute right-2 top-2 bottom-2 px-5 sm:px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs sm:text-sm rounded-lg transition-colors flex items-center gap-1.5 shadow"
+              className="absolute right-1.5 sm:right-2 top-1.5 sm:top-2 bottom-1.5 sm:bottom-2 px-3.5 sm:px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs sm:text-sm rounded-lg transition-colors flex items-center gap-1 sm:gap-1.5 shadow"
             >
               <span>搜索</span>
-              <ArrowRight size={16} />
+              <ArrowRight size={15} />
             </button>
           </div>
 
           {/* End input bar */}
 
           {/* Filters & Sorting Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-4 pt-3 border-t border-slate-100 dark:border-slate-800">
-            <div className="flex flex-wrap items-center gap-2.5">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+          <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center justify-between gap-3 sm:gap-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+            <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 sm:gap-2.5 w-full sm:w-auto">
+              <div className="hidden sm:flex items-center gap-1.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">
                 <Filter size={14} />
                 <span>过滤:</span>
               </div>
@@ -323,7 +323,7 @@ export const SearchSection: React.FC<SearchSectionProps> = ({
               <select
                 value={language}
                 onChange={(e) => setLanguage(e.target.value)}
-                className="bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs rounded-lg px-2.5 py-1.5 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-full sm:w-auto bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs rounded-lg px-2.5 py-2 sm:py-1.5 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"
               >
                 <option value="all">所有语言</option>
                 <option value="Chinese">中文 (Chinese)</option>
@@ -336,9 +336,9 @@ export const SearchSection: React.FC<SearchSectionProps> = ({
               <select
                 value={extension}
                 onChange={(e) => setExtension(e.target.value)}
-                className="bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs rounded-lg px-2.5 py-1.5 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-full sm:w-auto bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs rounded-lg px-2.5 py-2 sm:py-1.5 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"
               >
-                <option value="all">所有格式 (.pdf, .epub, .mobi...)</option>
+                <option value="all">所有格式 (.pdf, .epub...)</option>
                 <option value="pdf">PDF 电子文档</option>
                 <option value="epub">EPUB 流式排版</option>
                 <option value="mobi">MOBI Kindle</option>
@@ -346,7 +346,7 @@ export const SearchSection: React.FC<SearchSectionProps> = ({
 
               {/* Year Range Inputs */}
               <div className="flex items-center gap-1 text-xs text-slate-500">
-                <Calendar size={13} className="text-slate-400" />
+                <Calendar size={13} className="text-slate-400 shrink-0" />
                 <span className="hidden sm:inline">出版年份:</span>
                 <input
                   type="number"
@@ -354,7 +354,7 @@ export const SearchSection: React.FC<SearchSectionProps> = ({
                   value={yearFrom}
                   onChange={(e) => setYearFrom(e.target.value)}
                   onBlur={() => fetchBooks()}
-                  className="w-14 sm:w-16 px-1.5 py-1 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded text-xs text-center focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  className="w-full sm:w-16 min-w-0 px-1.5 py-1.5 sm:py-1 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded text-xs text-center focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 />
                 <span>-</span>
                 <input
@@ -363,7 +363,7 @@ export const SearchSection: React.FC<SearchSectionProps> = ({
                   value={yearTo}
                   onChange={(e) => setYearTo(e.target.value)}
                   onBlur={() => fetchBooks()}
-                  className="w-14 sm:w-16 px-1.5 py-1 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded text-xs text-center focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  className="w-full sm:w-16 min-w-0 px-1.5 py-1.5 sm:py-1 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded text-xs text-center focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 />
               </div>
 
@@ -376,7 +376,7 @@ export const SearchSection: React.FC<SearchSectionProps> = ({
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as any)}
-                className="bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs rounded-lg px-2.5 py-1.5 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-full sm:w-auto bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs rounded-lg px-2.5 py-2 sm:py-1.5 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"
               >
                 <option value="relevance">相关度优先</option>
                 <option value="rating">评分最高</option>
@@ -609,29 +609,29 @@ export const SearchSection: React.FC<SearchSectionProps> = ({
                       )}
                     </div>
 
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                       <button
                         onClick={() => onOpenAISummary(book)}
-                        className="px-2 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1"
+                        className="px-1.5 sm:px-2 py-2 sm:py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-[11px] sm:text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1 whitespace-nowrap"
                         title="查看 AI 提炼书评与导读"
                       >
-                        <Sparkles size={13} className="text-amber-500" />
+                        <Sparkles size={12} className="text-amber-500 shrink-0" />
                         <span>AI 导读</span>
                       </button>
 
                       <button
                         onClick={() => handleCopyCitation(book)}
-                        className="px-2 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1"
+                        className="px-1.5 sm:px-2 py-2 sm:py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-[11px] sm:text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1 whitespace-nowrap"
                         title="复制标准学术文献引用"
                       >
-                        {isCopied ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}
+                        {isCopied ? <Check size={12} className="text-emerald-500 shrink-0" /> : <Copy size={12} className="shrink-0" />}
                         <span>{isCopied ? '已复制' : '复制引用'}</span>
                       </button>
 
                       <button
                         onClick={() => onStartDownload(book)}
                         disabled={isDownloaded}
-                        className={`px-2 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1 shadow-sm ${
+                        className={`px-1.5 sm:px-2 py-2 sm:py-1.5 text-[11px] sm:text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1 shadow-sm whitespace-nowrap ${
                           isDownloaded
                             ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 cursor-default'
                             : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-600/20'
@@ -639,12 +639,12 @@ export const SearchSection: React.FC<SearchSectionProps> = ({
                       >
                         {isDownloaded ? (
                           <>
-                            <CheckCircle2 size={13} />
+                            <CheckCircle2 size={12} className="shrink-0" />
                             <span>已在书库</span>
                           </>
                         ) : (
                           <>
-                            <Download size={13} />
+                            <Download size={12} className="shrink-0" />
                             <span>立即下载</span>
                           </>
                         )}

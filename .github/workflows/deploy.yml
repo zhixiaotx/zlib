@@ -1,4 +1,4 @@
-name: 打包并推送部署至 GitHub Pages (gh-pages 分支)
+name: 打包并推送至 gh-pages 分支自动部署 GitHub Pages
 
 on:
   push:
@@ -15,25 +15,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-deploy:
+  build-and-push-gh-pages:
     runs-on: ubuntu-24.04
     steps:
-      - name: 检出仓库代码 (Checkout)
+      - name: 1. 检出仓库代码 (Checkout)
         uses: actions/checkout@v6
 
-      - name: 设置 Node.js 环境 (Node 22)
+      - name: 2. 配置 Node.js 22 运行环境
         uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: 'npm'
 
-      - name: 安装项目依赖 (npm install)
+      - name: 3. 安装项目依赖
         run: npm install --legacy-peer-deps
 
-      - name: 使用相对路径构建生产静态包 (npm run build)
-        run: npm run build
+      - name: 4. 使用相对路径 (base ./ ) 构建前端静态产物
+        run: |
+          npm run build
+          grep -q "./assets/" dist/index.html || (echo "[警告] 未检测到相对路径 ./assets/，请检查 vite.config.ts" && exit 1)
+          cp dist/index.html dist/404.html
+          touch dist/.nojekyll
 
-      - name: 部署推送到 gh-pages 分支 (Push to gh-pages)
+      - name: 5. 推送打包产物 dist/ 至 gh-pages 分支触发部署
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -42,4 +46,4 @@ jobs:
           force_orphan: true
           user_name: 'github-actions[bot]'
           user_email: 'github-actions[bot]@users.noreply.github.com'
-          commit_message: 'deploy: 自动构建产物并推送至 gh-pages 分支 [skip ci]'
+          commit_message: 'deploy: 相对路径打包 dist 并推送部署至 gh-pages 分支 [skip ci]'

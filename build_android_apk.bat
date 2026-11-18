@@ -6,9 +6,18 @@ echo ====================================================
 where node >nul 2>nul || (echo [错误] 未检测到 Node.js 20/22+ & pause & exit /b 1)
 where java >nul 2>nul || (echo [错误] 未检测到 JDK 17，请先安装 Temurin/Adoptium JDK 17 & pause & exit /b 1)
 
-echo [1/4] 安装项目依赖并构建前端相对路径产物...
-call npm install --legacy-peer-deps || (pause & exit /b 1)
-call npm run build || (pause & exit /b 1)
+if exist index.html (
+  echo [1/4] 安装项目依赖并构建前端相对路径产物...
+  call npm install --legacy-peer-deps || (pause & exit /b 1)
+  call npm run build || (pause & exit /b 1)
+) else if exist dist\index.html (
+  echo [1/4] 检测到预编译 dist/ 资源包，安装 Capacitor 运行依赖...
+  call npm install --legacy-peer-deps @capacitor/core@^6.2.0 @capacitor/cli@^6.2.0 @capacitor/android@^6.2.0 || (pause & exit /b 1)
+) else (
+  echo [错误] 未找到 index.html 或 dist\index.html，请确认压缩包完整解压！
+  pause
+  exit /b 1
+)
 
 if not exist android (
   echo [2/4] 初始化 Capacitor v6 Android 原生工程...
@@ -28,4 +37,3 @@ cd ..
 echo.
 echo [打包成功] APK 输出路径: android\app\build\outputs\apk\debug\app-debug.apk
 pause
-

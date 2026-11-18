@@ -7,10 +7,32 @@ export function normalizeMirrorBaseUrl(mirrorUrl?: string): string {
 }
 
 export function formatCookieHeader(token?: string): string {
-  const raw = (token || '').trim();
+  const raw = (token || '')
+    .trim()
+    .replace(/^Cookie:\s*/i, '')
+    .replace(/\r?\n+/g, '; ')
+    .trim();
   if (!raw) return '';
   if (raw.includes('=')) return raw;
   return `zlibrary_session=${raw}; remind_me=${raw}; remix_userkey=${raw}`;
+}
+
+function parseCookieMeta(cookieStr: string): {
+  remixUserId: string;
+  remixUserKey: string;
+  zlibrarySession: string;
+  remindMe: string;
+} {
+  const getVal = (name: string) => {
+    const m = cookieStr.match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`, 'i'));
+    return m ? m[1].trim() : '';
+  };
+  return {
+    remixUserId: getVal('remix_userid'),
+    remixUserKey: getVal('remix_userkey'),
+    zlibrarySession: getVal('zlibrary_session'),
+    remindMe: getVal('remind_me')
+  };
 }
 
 export function buildMirrorSearchUrl(params: {
@@ -442,12 +464,41 @@ export async function loginZlibAccount(payload: {
         };
       }
 
-      // Cookie verification via Tauri Rust: first check /api/auth-status
+      // Cookie verification via Tauri Rust
+      const formattedCookie = formatCookieHeader(cookieToken);
+      const cookieMeta = parseCookieMeta(formattedCookie);
+      const mirrorHost = mirrorBase.replace(/^https?:\/\//, '');
+      const defaultName = cookieMeta.remixUserId ? `Z-Lib (${cookieMeta.remixUserId})` : 'Z-Lib 账号';
+      const defaultEmail = cookieMeta.remixUserId
+        ? `UID ${cookieMeta.remixUserId} (${mirrorHost})`
+        : `Cookie (${mirrorHost})`;
+      const isZlibIdCluster = /z-lib\.id|z-lib\.cc/i.test(mirrorBase);
+
+      if (isZlibIdCluster && cookieMeta.remixUserId && cookieMeta.remixUserKey && !cookieMeta.zlibrarySession) {
+        return {
+          success: true,
+          warning: `已成功保存官方集群凭证 (remix_userid: ${cookieMeta.remixUserId})！该凭证用于 z-library.sk / 1lib.sk 等官方镜像；当前检索节点 (${mirrorBase}) 无需登录即可搜书，若要校验该凭证实时配额可切换至官方节点。`,
+          user: {
+            id: `acc_${Date.now()}`,
+            email: defaultEmail,
+            name: defaultName,
+            dailyDownloadsLimit: 10,
+            downloadsRemaining: 10,
+            isPremium: false,
+            remindMeToken: formattedCookie,
+            loginMethod: 'cookie',
+            addedAt: new Date().toLocaleDateString('zh-CN'),
+            mirrorUrl: mirrorBase,
+            verified: false
+          }
+        };
+      }
+
       try {
         const authResp = await tauriInvoke('mirror_http_request', {
           url: `${mirrorBase}/api/auth-status`,
           method: 'GET',
-          headers: { Cookie: formatCookieHeader(cookieToken), Accept: 'application/json' },
+          headers: { Cookie: formattedCookie, Accept: 'application/json' },
           body: null
         });
         if (authResp.ok) {
@@ -458,12 +509,72 @@ export async function loginZlibAccount(payload: {
                 success: true,
                 user: {
                   id: `acc_${Date.now()}`,
-                  email: authJson.user.email || `Cookie (${mirrorBase.replace(/^https?:\/\//, '')})`,
-                  name: authJson.user.name || 'Z-Lib 账号',
+                  email: authJson.user.email || defaultEmail,
+                  name: authJson.user.name || defaultName,
                   dailyDownloadsLimit: 10,
                   downloadsRemaining: 10,
                   isPremium: false,
-                  remindMeToken: cookieToken,
+                  remindMeToken: formattedCookie,
+                  loginMethod: 'cookie',
+                  addedAt: new Date().toLocaleDateString('zh-CN'),
+                  mirrorUrl: mirrorBase,
+                  verified: true
+                }
+              };
+            }
+            return {
+              success: true,
+              warning: `已保存 Cookie，但 ${mirrorBase} 返回未登录状态（提示：z-lib.id 节点使用 zlibrary_session，而官网 z-library.sk 等使用 remix_userid + remix_userkey）。`,
+              user: {
+                id: `acc_${Date.now()}`,
+                email: defaultEmail,
+                name: defaultName,
+                dailyDownloadsLimit: 10,
+                downloadsRemaining: 10,
+                isPremium: false,
+                remindMeToken: formattedCookie,
+                loginMethod: 'cookie',
+                addedAt: new Date().toLocaleDateString('zh-CN'),
+                mirrorUrl: mirrorBase,
+                verified: false
+              }
+            };
+          }
+        }
+      } catch {
+        // fall through to EAPI / homepage check
+      }
+
+      // Classic Z-Library EAPI profile check
+      if (cookieMeta.remixUserId && cookieMeta.remixUserKey) {
+        try {
+          const profileResp = await tauriInvoke('mirror_http_request', {
+            url: `${mirrorBase}/eapi/user/profile`,
+            method: 'GET',
+            headers: {
+              Cookie: formattedCookie,
+              Referer: mirrorBase,
+              Accept: 'application/json'
+            },
+            body: null
+          });
+          if (profileResp.ok) {
+            const profileJson = JSON.parse(profileResp.body || 'null');
+            const u = profileJson?.user;
+            if (u && (u.id || u.email)) {
+              const limit = Number(u.downloads_limit) > 0 ? Number(u.downloads_limit) : 10;
+              const today = Number(u.downloads_today) >= 0 ? Number(u.downloads_today) : 0;
+              const remaining = Math.max(0, limit - today);
+              return {
+                success: true,
+                user: {
+                  id: `acc_${Date.now()}`,
+                  email: u.email || defaultEmail,
+                  name: u.name || defaultName,
+                  dailyDownloadsLimit: limit,
+                  downloadsRemaining: remaining,
+                  isPremium: limit > 20,
+                  remindMeToken: formattedCookie,
                   loginMethod: 'cookie',
                   addedAt: new Date().toLocaleDateString('zh-CN'),
                   mirrorUrl: mirrorBase,
@@ -472,16 +583,16 @@ export async function loginZlibAccount(payload: {
               };
             }
           }
+        } catch {
+          // fall through to homepage check
         }
-      } catch {
-        // fall through to homepage check
       }
 
       const resp = await tauriInvoke('mirror_http_request', {
         url: `${mirrorBase}/`,
         method: 'GET',
         headers: {
-          Cookie: formatCookieHeader(cookieToken),
+          Cookie: formattedCookie,
           Referer: mirrorBase
         },
         body: null
@@ -498,16 +609,16 @@ export async function loginZlibAccount(payload: {
       return {
         success: true,
         warning: cfBlocked
-          ? `镜像站 (${mirrorBase}) 开启了人机拦截，Cookie 已保存并将用于代理尝试。`
+          ? `镜像站 (${mirrorBase}) 开启了人机防爬校验 (HTTP ${resp.status})，已本地保存 Cookie 凭证（${cookieMeta.remixUserId ? `UID ${cookieMeta.remixUserId}` : 'Cookie'}）。`
           : undefined,
         user: {
           id: `acc_${Date.now()}`,
-          email: `Cookie (${mirrorBase.replace(/^https?:\/\//, '')})`,
-          name: `Z-Lib 账号`,
+          email: defaultEmail,
+          name: defaultName,
           dailyDownloadsLimit: limit,
           downloadsRemaining: remaining,
           isPremium: isVip,
-          remindMeToken: cookieToken,
+          remindMeToken: formattedCookie,
           loginMethod: 'cookie',
           addedAt: new Date().toLocaleDateString('zh-CN'),
           mirrorUrl: mirrorBase,
@@ -526,21 +637,25 @@ export async function loginZlibAccount(payload: {
   if (!cookieToken) {
     return {
       success: false,
-      error: `当前为纯前端浏览器环境，受浏览器跨域策略限制无法直接向镜像站 (${mirrorBase}) 提交账号密码。请在浏览器打开镜像登录后使用 Remind-Me Cookie 导入。`
+      error: `当前为纯前端浏览器环境，受浏览器跨域策略限制无法直接向镜像站 (${mirrorBase}) 提交账号密码。请在浏览器打开镜像登录后使用 Cookie（remix_userid / zlibrary_session）导入。`
     };
   }
 
+  const formattedFallbackCookie = formatCookieHeader(cookieToken);
+  const fallbackMeta = parseCookieMeta(formattedFallbackCookie);
+  const fallbackHost = mirrorBase.replace(/^https?:\/\//, '');
+
   return {
     success: true,
-    warning: `当前为纯前端静态页面，已绑定镜像 ${mirrorBase} 并保存 Cookie（每日默认非 VIP 10 本额度）。`,
+    warning: `当前为纯前端静态页面，已绑定镜像 ${mirrorBase} 并保存 Cookie${fallbackMeta.remixUserId ? ` (remix_userid: ${fallbackMeta.remixUserId})` : ''}（默认非 VIP 每日 10 本额度）。`,
     user: {
       id: `acc_${Date.now()}`,
-      email: `Cookie (${mirrorBase.replace(/^https?:\/\//, '')})`,
-      name: `Z-Lib 账号`,
+      email: fallbackMeta.remixUserId ? `UID ${fallbackMeta.remixUserId} (${fallbackHost})` : `Cookie (${fallbackHost})`,
+      name: fallbackMeta.remixUserId ? `Z-Lib (${fallbackMeta.remixUserId})` : `Z-Lib 账号`,
       dailyDownloadsLimit: 10,
       downloadsRemaining: 10,
       isPremium: false,
-      remindMeToken: cookieToken,
+      remindMeToken: formattedFallbackCookie,
       loginMethod: 'cookie',
       addedAt: new Date().toLocaleDateString('zh-CN'),
       mirrorUrl: mirrorBase,
@@ -1312,16 +1427,20 @@ export async function getPackagerConfigFilesClient(): Promise<Record<string, str
 chcp 65001 >nul
 where node >nul 2>nul || (echo [错误] 请先安装 Node.js 20/22+ & pause & exit /b 1)
 where cargo >nul 2>nul || (echo [错误] 请先安装 Rustup & pause & exit /b 1)
-call npm install --legacy-peer-deps || (pause & exit /b 1)
-call npm run build || (pause & exit /b 1)
+if exist index.html (
+  call npm install --legacy-peer-deps || (pause & exit /b 1)
+  call npm run build || (pause & exit /b 1)
+)
 call npx --yes @tauri-apps/cli@1.5 build || (pause & exit /b 1)
 pause`,
     'build_android_apk.bat': `@echo off
 chcp 65001 >nul
 where node >nul 2>nul || (echo [错误] 请先安装 Node.js 20/22+ & pause & exit /b 1)
 where java >nul 2>nul || (echo [错误] 请先安装 JDK 17 & pause & exit /b 1)
-call npm install --legacy-peer-deps || (pause & exit /b 1)
-call npm run build || (pause & exit /b 1)
+if exist index.html (
+  call npm install --legacy-peer-deps || (pause & exit /b 1)
+  call npm run build || (pause & exit /b 1)
+)
 if not exist android (
   call npm install --legacy-peer-deps @capacitor/core@^6.2.0 @capacitor/cli@^6.2.0 @capacitor/android@^6.2.0 || (pause & exit /b 1)
   call npx cap add android || (pause & exit /b 1)
@@ -1331,6 +1450,39 @@ cd android
 call gradlew.bat assembleDebug || (cd .. & pause & exit /b 1)
 cd ..
 pause`,
+    '.github/workflows/deploy.yml': `name: 打包并推送至 gh-pages 分支自动部署 GitHub Pages
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  build-and-push-gh-pages:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: 'npm'
+      - run: npm install --legacy-peer-deps
+      - run: |
+          npm run build
+          grep -q "./assets/" dist/index.html
+          cp dist/index.html dist/404.html
+          touch dist/.nojekyll
+      - uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: \${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+          publish_branch: gh-pages
+          force_orphan: true`,
     '.github/workflows/build-release.yml': `name: 自动编译 Windows EXE 与 Android APK 安装包
 
 on:
@@ -1350,6 +1502,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+          cache: 'npm'
       - uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
@@ -1360,7 +1513,7 @@ jobs:
           npm install --legacy-peer-deps
           npm run build
           npm install --legacy-peer-deps @capacitor/core@^6.2.0 @capacitor/cli@^6.2.0 @capacitor/android@^6.2.0
-          npx cap add android || true
+          if [ ! -d "android" ]; then npx cap add android; fi
           npx cap sync android
           cd android && chmod +x ./gradlew && ./gradlew assembleDebug
       - name: 上传 APK 构建产物
@@ -1377,6 +1530,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+          cache: 'npm'
       - uses: dtolnay/rust-toolchain@stable
       - name: 构建 Tauri Windows EXE
         run: |
@@ -1391,33 +1545,19 @@ jobs:
             src-tauri/target/release/zlib-downloader.exe
             src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: warn`,
-    '.github/workflows/deploy.yml': `name: 打包并推送部署至 GitHub Pages (gh-pages 分支)
+    'vercel.json': `{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "installCommand": "npm install --legacy-peer-deps",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist"
+}`,
+    'netlify.toml': `[build]
+  command = "npm install --legacy-peer-deps && npm run build"
+  publish = "dist"
 
-on:
-  push:
-    branches: [ main, master ]
-  workflow_dispatch:
-
-permissions:
-  contents: write
-  pages: write
-  id-token: write
-
-jobs:
-  build-and-deploy:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-      - run: npm install --legacy-peer-deps
-      - run: npm run build
-      - uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: \${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./dist
-          publish_branch: gh-pages
-          force_orphan: true`
+[build.environment]
+  NODE_VERSION = "22"
+  NPM_FLAGS = "--legacy-peer-deps"`
   };
 }

@@ -55,9 +55,9 @@ export const Pagination: React.FC<PaginationProps> = ({
   };
 
   return (
-    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-4 sm:px-5 py-3.5 shadow-sm flex flex-wrap items-center justify-between gap-4 text-xs">
+    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-3.5 sm:px-5 py-3.5 shadow-sm flex flex-wrap items-center justify-between gap-3 sm:gap-4 text-xs">
       {/* Left: Record summary & Page Size selector */}
-      <div className="flex flex-wrap items-center gap-3 text-slate-600 dark:text-slate-400">
+      <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 text-slate-600 dark:text-slate-400">
         <span className="font-mono">
           第 <strong className="text-slate-900 dark:text-white">{startItem}-{endItem}</strong> {itemLabel} / 共 <strong className="text-slate-900 dark:text-white">{totalItems}</strong> {itemLabel}
         </span>
@@ -67,7 +67,7 @@ export const Pagination: React.FC<PaginationProps> = ({
           <select
             value={pageSize}
             onChange={(e) => onPageSizeChange(Number(e.target.value))}
-            className="bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 rounded-lg px-2 py-1 font-mono font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+            className="bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 rounded-lg px-2 py-1.5 sm:py-1 font-mono font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
           >
             {pageSizeOptions.map((opt) => (
               <option key={opt} value={opt}>
@@ -79,7 +79,7 @@ export const Pagination: React.FC<PaginationProps> = ({
       </div>
 
       {/* Right: Page Navigation Controls */}
-      <div className="flex items-center gap-1 ml-auto">
+      <div className="flex items-center gap-1 ml-auto max-w-full overflow-x-auto scrollbar-none">
         <button
           type="button"
           onClick={() => onPageChange(1)}
@@ -94,7 +94,7 @@ export const Pagination: React.FC<PaginationProps> = ({
           type="button"
           onClick={() => onPageChange(safeCurrent - 1)}
           disabled={safeCurrent <= 1}
-          className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1 font-medium"
+          className="px-2.5 py-2 sm:py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1 font-medium shrink-0"
           title="上一页"
         >
           <ChevronLeft size={14} />
