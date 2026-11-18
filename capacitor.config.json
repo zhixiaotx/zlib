@@ -1,0 +1,13 @@
+{
+  "appId": "com.zlib.mobile.downloader",
+  "appName": "Zlib 下载器",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": true,
+    "captureInput": true
+  }
+}

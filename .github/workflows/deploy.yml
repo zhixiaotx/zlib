@@ -1,0 +1,45 @@
+name: 打包并推送部署至 GitHub Pages (gh-pages 分支)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: 'pages'
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库代码 (Checkout)
+        uses: actions/checkout@v4
+
+      - name: 设置 Node.js 环境 (Node 18)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'npm'
+
+      - name: 安装项目依赖 (npm install)
+        run: npm install
+
+      - name: 使用相对路径构建生产静态包 (npm run build)
+        run: npm run build
+
+      - name: 部署推送到 gh-pages 分支 (Push to gh-pages)
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+          publish_branch: gh-pages
+          force_orphan: true
+          user_name: 'github-actions[bot]'
+          user_email: 'github-actions[bot]@users.noreply.github.com'
+          commit_message: 'deploy: 自动构建产物并推送至 gh-pages 分支 [skip ci]'

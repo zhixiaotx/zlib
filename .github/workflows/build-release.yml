@@ -1,0 +1,71 @@
+name: 自动编译 Windows EXE 与 Android APK 安装包
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-android-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Node.js 20 环境
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 配置 Java JDK 17 环境
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 构建 Web 并编译 Android APK
+        run: |
+          npm install
+          npm run build
+          npm install @capacitor/core @capacitor/cli @capacitor/android
+          npx cap add android || true
+          npx cap sync android
+          cd android && chmod +x ./gradlew && ./gradlew assembleDebug
+
+      - name: 上传 Android APK 安装包产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: zlib-downloader-android-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+
+  build-windows-exe:
+    runs-on: windows-latest
+    steps:
+      - name: 检出仓库代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Node.js 20 环境
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 配置 Rust 编译链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 构建 Tauri Windows EXE 便携版与安装包
+        run: |
+          npm install
+          npm run build
+          npx @tauri-apps/cli@1.5 build
+
+      - name: 上传 Windows EXE 构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: zlib-downloader-windows-exe
+          path: |
+            src-tauri/target/release/zlib-downloader.exe
+            src-tauri/target/release/bundle/nsis/*.exe

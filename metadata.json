@@ -1,0 +1,6 @@
+{
+  "name": "Z-Library Desktop Downloader (Tauri Edition)",
+  "description": "A high-performance Z-Library desktop downloader built with Tauri framework, featuring real-time download progress bars, book search, download queue, mirrors management, and native installer generation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
